@@ -5,6 +5,7 @@ import { ContentRepository } from './catalog/content.repository';
 import { TmdbList, TmdbService, tmdbIdFromSlug } from './tmdb/tmdb.service';
 import { YouTubeFeedService } from './sports/youtube-feed.service';
 import { ChannelHealthService } from './channels/channel-health.service';
+import { EmbedAvailabilityService } from './playback/embed-availability.service';
 
 type Item = Record<string, unknown>;
 export type HomeTab = 'all' | 'live' | 'sports' | 'movies' | 'series' | 'dramas';
@@ -21,7 +22,7 @@ const AVAILABILITY_NOTE = 'Availability depends on rights and the source provide
 @Injectable()
 export class CatalogService {
   private channelCache: { expires: number; items: Channel[] } | null = null;
-  constructor(private readonly channels: ChannelRepository, private readonly content: ContentRepository, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService) {}
+  constructor(private readonly channels: ChannelRepository, private readonly content: ContentRepository, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService) {}
 
   /** Every playable channel, cached briefly so one home request reads the table once. */
   private async liveChannels(): Promise<Channel[]> {
@@ -40,8 +41,14 @@ export class CatalogService {
   private async safe<T>(work: Promise<T>, fallback: T): Promise<T> { try { return await work; } catch { return fallback; } }
 
   async home(tab: HomeTab = 'all') {
-    const { hero, sections } = await this.feed(tab);
-    return { data: { tab, hero: hero.slice(0, 8), sections: sections.filter((section) => section.items.length), availabilityNote: AVAILABILITY_NOTE } };
+    const feed = await this.feed(tab);
+    // Only titles whose embed the provider confirmed are shown; one check covers every rail.
+    const kept = new Set(await this.availability.keepPlayable([...feed.hero, ...feed.sections.flatMap((section) => section.items)]));
+    const hero = feed.hero.filter((item) => kept.has(item)).slice(0, 8);
+    const sections = feed.sections
+      .map((section) => { const items = section.items.filter((item) => kept.has(item)); return { ...section, items: section.style === 'ranked' ? items.slice(0, 10) : items }; })
+      .filter((section) => section.items.length);
+    return { data: { tab, hero, sections, availabilityNote: AVAILABILITY_NOTE } };
   }
 
   private async feed(tab: HomeTab): Promise<{ hero: Item[]; sections: HomeSection[] }> {
@@ -79,7 +86,7 @@ export class CatalogService {
         { id: 'local-movies', title: 'Featured on NEXO', style: 'posters', items: local },
         { id: 'movies-trending', title: 'Trending', style: 'posters', items: trending.slice(0, RAIL), viewAll: { kind: 'movies', list: 'trending' } },
         { id: 'movies-reels', title: 'Reels', style: 'shorts', items: reels as unknown as Item[] },
-        { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popular.slice(0, 10) },
+        { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popular },
         { id: 'movies-now', title: 'New on NEXO', style: 'posters', items: nowPlaying.slice(0, RAIL), viewAll: { kind: 'movies', list: 'now_playing' } },
         { id: 'movies-bollywood', title: 'Bollywood', style: 'posters', items: bollywood.slice(0, RAIL), viewAll: { kind: 'movies', language: 'hi' } },
         { id: 'movies-action', title: 'Action', style: 'posters', items: action.slice(0, RAIL), viewAll: { kind: 'movies', genre: 'Action' } },
@@ -102,7 +109,7 @@ export class CatalogService {
         { id: 'local-series', title: 'Featured on NEXO', style: 'posters', items: local },
         { id: 'series-trending', title: 'Trending Series', style: 'posters', items: trending.slice(0, RAIL), viewAll: { kind: 'series', list: 'trending' } },
         { id: 'series-reels', title: 'Reels', style: 'shorts', items: reels as unknown as Item[] },
-        { id: 'series-top-ten', title: 'Top Ten', style: 'ranked', items: popular.slice(0, 10) },
+        { id: 'series-top-ten', title: 'Top Ten', style: 'ranked', items: popular },
         { id: 'series-crime', title: 'Crime', style: 'posters', items: crime.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Crime' } },
         { id: 'series-action', title: 'Action & Adventure', style: 'posters', items: action.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Action & Adventure' } },
         { id: 'series-scifi', title: 'Sci-Fi & Fantasy', style: 'posters', items: scifi.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Sci-Fi & Fantasy' } },
@@ -142,7 +149,7 @@ export class CatalogService {
       this.channelRail('sports-channels', 'Sports Channels', this.inCategory(channels, 'Sports'), 'Sports'),
       { id: 'sports-highlights', title: 'Sports Highlights', style: 'landscape', items: highlights as unknown as Item[] },
       { id: 'sports-shorts', title: 'Shorts', style: 'shorts', items: shorts as unknown as Item[] },
-      { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popularMovies.slice(0, 10) },
+      { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popularMovies },
       { id: 'series-trending', title: 'Trending Series', style: 'posters', items: trendingSeries.slice(0, RAIL), viewAll: { kind: 'series', list: 'trending' } },
       { id: 'movies-bollywood', title: 'Bollywood', style: 'posters', items: bollywood.slice(0, RAIL), viewAll: { kind: 'movies', language: 'hi' } },
       this.channelRail('movie-channels', 'Movie Channels', this.inCategory(channels, 'Movies'), 'Movies'),
@@ -176,7 +183,8 @@ export class CatalogService {
       this.safe(this.content.seriesList({ limit: 50, q: query, genre: filters.genre, language: filters.language, year: filters.year }).then((result) => result.data as Item[]), []),
       this.tmdb.searchMovies(query), this.tmdb.searchSeries(query),
     ]);
-    const data = [...channels, ...movies, ...series, ...tmdbMovies.slice(0, 15), ...tmdbSeries.slice(0, 15)];
+    const [playableMovies, playableSeries] = await Promise.all([this.availability.keepPlayable(tmdbMovies), this.availability.keepPlayable(tmdbSeries)]);
+    const data = [...channels, ...movies, ...series, ...playableMovies.slice(0, 15), ...playableSeries.slice(0, 15)];
     return { data, meta: { query: q, count: data.length } };
   }
 
@@ -186,11 +194,12 @@ export class CatalogService {
     const remote: Item[] = query.q?.trim() ? await this.tmdb.searchMovies(query.q.trim(), page)
       : query.genre || query.language || query.year ? await this.tmdb.discoverMovies({ genre: query.genre, language: query.language, year: query.year, page, sort: query.list === 'top_rated' ? 'vote_average.desc' : undefined })
       : await this.tmdb.movieList(query.list ?? 'popular', page);
-    const data = [...local, ...remote];
+    // hasMore follows TMDB's page size, not how many titles passed the embed check.
+    const data = [...local, ...(await this.availability.keepPlayable(remote))];
     return { data, meta: { count: data.length, page, limit: data.length, hasMore: remote.length >= 15 } };
   }
 
-  async movieBySlug(slug: string) { const id = tmdbIdFromSlug(slug); return id ? this.tmdb.movie(id) : this.content.movieBySlug(slug); }
+  async movieBySlug(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.movieBySlug(slug); return (await this.availability.isPlayable('movie', id)) ? this.tmdb.movie(id) : null; }
 
   async series(query: ContentQuery) {
     const page = query.page ?? 1;
@@ -198,12 +207,13 @@ export class CatalogService {
     const remote: Item[] = query.q?.trim() ? await this.tmdb.searchSeries(query.q.trim(), page)
       : query.genre || query.language || query.year ? await this.tmdb.discoverSeries({ genre: query.genre, language: query.language, year: query.year, page, sort: query.list === 'top_rated' ? 'vote_average.desc' : undefined })
       : await this.tmdb.seriesList(query.list ?? 'popular', page);
-    const data = [...local, ...remote];
+    // hasMore follows TMDB's page size, not how many titles passed the embed check.
+    const data = [...local, ...(await this.availability.keepPlayable(remote))];
     return { data, meta: { count: data.length, page, limit: data.length, hasMore: remote.length >= 15 } };
   }
 
-  async seriesBySlug(slug: string) { const id = tmdbIdFromSlug(slug); return id ? this.tmdb.series(id) : this.content.seriesBySlug(slug); }
-  async seasons(slug: string) { const id = tmdbIdFromSlug(slug); return id ? this.tmdb.seasons(id) : this.content.seasons(slug); }
+  async seriesBySlug(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.seriesBySlug(slug); return (await this.availability.isPlayable('tv', id)) ? this.tmdb.series(id) : null; }
+  async seasons(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.seasons(slug); return (await this.availability.isPlayable('tv', id)) ? this.tmdb.seasons(id) : []; }
   episode(id: string) { return this.content.episode(id); }
   collections() { return this.content.collections(); }
 }

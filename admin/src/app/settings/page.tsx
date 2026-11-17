@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { api } from '@/lib/api';
 
-type Settings = { database?: boolean; tmdb?: boolean; vidsrc?: boolean; vidsrcHost?: string | null; superembed?: boolean; superembedHost?: string | null; sportsYouTubeChannels?: number; playbackAllowlist?: number };
+type Settings = { database?: boolean; tmdb?: boolean; superembed?: boolean; superembedHost?: string | null; sportsYouTubeChannels?: number; playbackAllowlist?: number };
 
 function Row({ label, detail, ok, value }: { label: string; detail: string; ok: boolean; value: string }) {
   return <div className="flex items-start justify-between gap-4 border-t border-white/10 py-4 text-sm">
@@ -25,8 +25,7 @@ export default async function SettingsPage() {
       <p className="mt-3 pb-4 text-sm leading-relaxed text-muted">Providers are configured in the API environment file. Secret values are never shown here.</p>
       <Row label="Catalog database" detail="Channels and categories are read from channeltb and categorydb." ok={Boolean(settings.database)} value={settings.database ? 'Connected' : 'Not configured'} />
       <Row label="TMDB metadata" detail="Movie, series and drama listings, artwork and episode guides. Set TMDB_API_KEY." ok={Boolean(settings.tmdb)} value={settings.tmdb ? 'Enabled' : 'Missing key'} />
-      <Row label="Superembed (movies)" detail="Movie playback by TMDB id. Override with SUPEREMBED_BASE_URL, or set it to off." ok={Boolean(settings.superembed)} value={settings.superembed ? settings.superembedHost ?? 'Enabled' : 'Disabled'} />
-      <Row label="VidSrc (series and dramas)" detail="Episode playback by TMDB id. Override with VIDSRC_BASE_URL, or set it to off." ok={Boolean(settings.vidsrc)} value={settings.vidsrc ? settings.vidsrcHost ?? 'Enabled' : 'Disabled'} />
+      <Row label="Superembed (movies, series and dramas)" detail="Playback by TMDB id. Titles are listed only after Superembed confirms it has them. Override with SUPEREMBED_BASE_URL, or set it to off." ok={Boolean(settings.superembed)} value={settings.superembed ? settings.superembedHost ?? 'Enabled' : 'Disabled'} />
       <Row label="YouTube sports feeds" detail="Sports rails use official YouTube embeds from the channels in SPORTS_YOUTUBE_CHANNELS." ok={(settings.sportsYouTubeChannels ?? 0) > 0} value={`${settings.sportsYouTubeChannels ?? 0} channels`} />
       <Row label="Playback host allowlist" detail="Optional. When PLAYBACK_ALLOWED_HOSTS is empty, any HTTPS stream URL stored in the catalog is playable." ok value={allowlist ? `${allowlist} hosts` : 'Any HTTPS host'} />
       <Row label="Public viewer access" detail="Viewers browse and watch without an account." ok value="Guest enabled" />

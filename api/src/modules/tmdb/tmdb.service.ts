@@ -118,7 +118,7 @@ export class TmdbService {
   async movie(id: number) { const row = await this.get(`/movie/${id}`, { append_to_response: 'videos' }, DETAIL_TTL); return row?.id && !row.adult ? { ...this.movieItem(row), trailerUrl: trailerUrl(row) } : null; }
   async series(id: number) { const row = await this.get(`/tv/${id}`, { append_to_response: 'videos' }, DETAIL_TTL); return row?.id && !row.adult ? { ...this.seriesItem(row), trailerUrl: trailerUrl(row) } : null; }
 
-  /** Seasons with their aired episodes; each episode carries its VidSrc embed. */
+  /** Seasons with their aired episodes; each episode carries its Superembed embed. */
   async seasons(id: number) {
     const show = await this.get(`/tv/${id}`, {}, DETAIL_TTL);
     if (!show?.id) return [];

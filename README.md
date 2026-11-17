@@ -28,9 +28,9 @@ The database initially contained no movie, series, season, episode, or collectio
 
 Useful database commands:
 
-- `npm run db:inspect` — read only schema inventory and channel/category column details.
-- `npm run db:migrate` — apply the additive catalog migration once.
-- `npm run db:seed` — import the operator supplied `db/seed/catalog.json`; empty input is a no op.
+- `npm run db:inspect` â€” read only schema inventory and channel/category column details.
+- `npm run db:migrate` â€” apply the additive catalog migration once.
+- `npm run db:seed` â€” import the operator supplied `db/seed/catalog.json`; empty input is a no op.
 
 ## Playback and content rights
 
@@ -40,10 +40,12 @@ Each kind of content has one source:
 | --- | --- | --- |
 | Live channels | `channeltb.liveurl` (HLS) | `video_player` |
 | Movies | TMDB listing, Superembed embed by TMDB id | in-app WebView |
-| Web series and dramas | TMDB listing and episode guide, VidSrc embed by TMDB id | in-app WebView |
+| Web series and dramas | TMDB listing and episode guide, Superembed embed by TMDB id | in-app WebView |
 | Sports videos | Uploads feed of the channels in `SPORTS_YOUTUBE_CHANNELS` | official YouTube IFrame Player |
 
-The API requires HTTPS for every playback URL and rejects URLs with embedded credentials. `PLAYBACK_ALLOWED_HOSTS` is an optional extra restriction; when it is empty, any HTTPS stream URL stored in the catalog plays. Embed URLs are built only by the API's playback module from `VIDSRC_BASE_URL` and `SUPEREMBED_BASE_URL` (defaults `https://vidsrc.net/embed` and `https://multiembed.mov`). These third-party services move domains from time to time: change the base URL if one stops loading, or set it to `off` to disable that provider. The in-app WebView blocks top-level navigation away from the embed once it has loaded, which stops most ad redirects. The app does not scrape sites, proxy streams, or extract media URLs. The operator is responsible for holding the rights to the channels and titles it makes available.
+The API requires HTTPS for every playback URL and rejects URLs with embedded credentials. `PLAYBACK_ALLOWED_HOSTS` is an optional extra restriction; when it is empty, any HTTPS stream URL stored in the catalog plays. Embed URLs are built only by the API's playback module from `SUPEREMBED_BASE_URL` (default `https://multiembed.mov`). This third-party service moves domains from time to time: change the base URL if it stops loading, or set it to `off` to disable it.
+
+TMDB titles are listed only when Superembed confirms it has them: movies are checked with their own embed URL, series and dramas with season 1 episode 1. Superembed answers "Not Found! This video doesn't exist." for missing titles; a title is rejected only when two checks 1.5 seconds apart agree, and at most 6 checks run at once. Results are stored in the `embed_availability` table (created automatically) for 7 days when playable and 2 days when missing. A listing waits at most 8 seconds for checks; titles not checked by then are left out and appear on a later load once their check finishes. Individual episodes beyond the first are not checked. The in-app WebView blocks top-level navigation away from the embed once it has loaded, which stops most ad redirects. The app does not scrape sites, proxy streams, or extract media URLs. The operator is responsible for holding the rights to the channels and titles it makes available.
 
 Movies and series added by hand in the admin panel still work and appear in a "Featured on NEXO" rail; their playback URL is whatever the operator enters.
 
@@ -61,7 +63,7 @@ From the repository root:
 
 - `npm run api:build`, `npm run api:test`, `npm run api:lint`
 - `npm run admin:build`, `npm run admin:lint`, `npm run admin:typecheck`
-- `npm run build` — build API and admin
+- `npm run build` â€” build API and admin
 
 For Flutter, from `apps/mobile`: `flutter analyze` and `flutter test`.
 
@@ -72,7 +74,7 @@ The admin app and the API deploy together as one Vercel project on one domain. T
 Vercel setup:
 
 - Import the repository and set **Root Directory** to `admin`. `admin/vercel.json` installs from the workspace root, and `npm run build` builds the API first (`prebuild`) and then Next.js.
-- Environment variables (all server only): `DATABASE_URL`, `ADMIN_API_TOKEN`, `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `TMDB_API_KEY`, `APP_API_KEYS`, and optionally `CORS_ORIGINS`, `PLAYBACK_ALLOWED_HOSTS`, `VIDSRC_BASE_URL`, `SUPEREMBED_BASE_URL`, `SPORTS_YOUTUBE_CHANNELS`. Do **not** set `API_BASE_URL`.
+- Environment variables (all server only): `DATABASE_URL`, `ADMIN_API_TOKEN`, `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `TMDB_API_KEY`, `APP_API_KEYS`, and optionally `CORS_ORIGINS`, `PLAYBACK_ALLOWED_HOSTS`, `SUPEREMBED_BASE_URL`, `SPORTS_YOUTUBE_CHANNELS`. Do **not** set `API_BASE_URL`.
 - Point Flutter at the deployment: copy `mobile/.env.example` to `mobile/.env` (git-ignored, bundled into the app) and set `API_BASE_URL` (`https://<your-domain>/api/v1`) and `APP_API_KEY` (one of `APP_API_KEYS`), then `flutter build apk`.
 - API access: every `/api/v1` request except `/health` needs `X-API-Key: <one of APP_API_KEYS>` or `Authorization: Bearer <ADMIN_API_TOKEN>`, otherwise it gets `401`. Without `APP_API_KEYS` the API is open in development and answers `503` in production.
 - Run `npm run db:migrate` once so the `channel_health` table exists. Stream check results are stored there and shared by every function instance.
