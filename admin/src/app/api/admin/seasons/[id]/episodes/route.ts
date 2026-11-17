@@ -1,0 +1,3 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { apiBase } from '@/lib/api';
+export async function POST(request:NextRequest,{params}:{params:Promise<{id:string}>}){const {id}=await params;const token=request.cookies.get('nexo_admin')?.value;if(!token)return NextResponse.json({error:'Unauthorized'},{status:401});try{const response=await fetch(`${await apiBase()}/admin/seasons/${encodeURIComponent(id)}/episodes`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(await request.json()),cache:'no-store'});return NextResponse.json(await response.json(),{status:response.status});}catch{return NextResponse.json({error:'API unavailable'},{status:503});}}

@@ -1,0 +1,21 @@
+{
+  "name": "nexo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "api",
+    "admin"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @nexo/admin",
+    "api:dev": "npm run start:dev -w @nexo/api",
+    "api:build": "npm run build -w @nexo/api",
+    "api:test": "npm run test -w @nexo/api",
+    "api:lint": "npm run lint -w @nexo/api",
+    "admin:dev": "npm run dev -w @nexo/admin",
+    "admin:build": "npm run build -w @nexo/admin",
+    "admin:lint": "npm run lint -w @nexo/admin",
+    "admin:typecheck": "npm run typecheck -w @nexo/admin",
+    "build": "npm run admin:build"
+  }
+}

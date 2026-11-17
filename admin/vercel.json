@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "cd .. && npm install",
+  "buildCommand": "npm run build",
+  "crons": [
+    { "path": "/api/cron/channel-health", "schedule": "0 5 * * *" }
+  ]
+}
