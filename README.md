@@ -2,6 +2,36 @@
 
 NEXO is a guest first discovery and playback app for live TV, movies, and web series. It has a Flutter mobile client, a NestJS API, and a Next.js operator panel that also hosts the API when deployed.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="screenshots/Screenshot%202026-11-17%20192348.png" width="240" alt="Home tab with featured series and Live TV rail"><br><sub>Home</sub></td>
+    <td align="center" width="33%"><img src="screenshots/Screenshot%202026-11-17%20192440.png" width="240" alt="Live TV tab with channels grouped by country"><br><sub>Live TV by country</sub></td>
+    <td align="center" width="33%"><img src="screenshots/Screenshot%202026-11-17%20192454.png" width="240" alt="Sports tab with World Cup highlights"><br><sub>Sports highlights</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20192506.png" width="240" alt="Sports tab with NBA recap and sports channels"><br><sub>Sports channels</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20192911.png" width="240" alt="Movies tab with reels and Top Ten"><br><sub>Movies: reels and Top Ten</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20192938.png" width="240" alt="Discover search with genre filters"><br><sub>Discover</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20192952.png" width="240" alt="Empty My List screen"><br><sub>My List (on device)</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193016.png" width="240" alt="Boishakhi TV live channel player"><br><sub>Live channel player</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193044.png" width="240" alt="World Cup highlight video player"><br><sub>Highlight player</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193135.png" width="240" alt="Bein Sports XTRA live channel"><br><sub>Live sports channel</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193218.png" width="240" alt="NH Bolly Flix movie channel"><br><sub>Movie channel</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193253.png" width="240" alt="Vertical shorts player"><br><sub>Shorts</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193409.png" width="240" alt="Columbo series details with Watch S1 E1"><br><sub>Series details</sub></td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
+
 ## Apps and boundaries
 
 - `apps/mobile`: Flutter + Dart, GoRouter, flutter_bloc/Cubit, Dio, `get_storage` for device local My List, `video_player` for HLS, the official YouTube IFrame Player, and `webview_flutter` for provider embeds.
@@ -82,3 +112,5 @@ Vercel setup:
 - Swagger (`/docs`) is only served by the standalone API (`npm run api:dev`).
 
 The API can still run on its own (`npm run start -w @nexo/api`) on any Node host; set the admin's `API_BASE_URL` to its HTTPS URL in that case. Supply operator owned imagery and rights cleared playback sources before publishing catalog entries.
+
+[Live Link] (https://drive.google.com/file/d/15J5GvjJ4ybmffYma1WsHI8WFQfHGhVIe/view?usp=sharing)

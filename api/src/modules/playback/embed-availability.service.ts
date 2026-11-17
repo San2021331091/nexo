@@ -112,7 +112,7 @@ export class EmbedAvailabilityService {
     try {
       const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
       if (response.status === 404 || response.status === 410) return false;
-      if (!response.ok || !response.body) return null;
+      if (!response.ok || !response.body) { this.logger.warn(`Embed check ${kind} ${id}: HTTP ${response.status} from ${new URL(response.url || url).host}`); return null; }
       // Only the start of the page is needed; playable pages are hundreds of KB.
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -120,7 +120,8 @@ export class EmbedAvailabilityService {
       while (html.length < READ_LIMIT) { const { done, value } = await reader.read(); if (done) break; html += decoder.decode(value, { stream: true }); }
       void reader.cancel().catch(() => undefined);
       return !looksMissing(html);
-    } catch {
+    } catch (error) {
+      this.logger.warn(`Embed check ${kind} ${id} failed: ${error instanceof Error ? `${error.name} ${(error as { cause?: { code?: string } }).cause?.code ?? error.message}` : error}`);
       return null;
     }
   }
@@ -189,6 +190,22 @@ export class EmbedAvailabilityService {
     if (!targets.length) return items;
     const playable = await this.resolve(targets, budgetMs);
     return items.filter((item) => { const target = embedTarget(item); return !target || playable.get(key(target.kind, target.id)) === true; });
+  }
+
+  /** Raw view of one canary request from this server, for the admin diagnostic endpoint. */
+  async diagnose(kind: EmbedKind = 'movie') {
+    const url = this.url(kind, CANARY[kind]);
+    const state = { paused: this.paused, pausedForSeconds: Math.max(0, Math.round((this.pausedUntil - Date.now()) / 1000)), requestsLastMinute: this.requestTimes.filter((time) => Date.now() - time < 60_000).length, cachedResults: this.memory.size };
+    if (!url) return { url: null, error: 'Provider disabled', ...state };
+    const started = Date.now();
+    try {
+      const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
+      const html = (await response.text()).slice(0, READ_LIMIT);
+      const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      return { url, status: response.status, finalHost: new URL(response.url || url).host, ms: Date.now() - started, server: response.headers.get('server'), title: (/<title>([^<]*)/i.exec(html)?.[1] ?? '').trim(), looksMissing: looksMissing(html), text: text.slice(0, 300), ...state };
+    } catch (error) {
+      return { url, ms: Date.now() - started, error: error instanceof Error ? `${error.name}: ${(error as { cause?: { code?: string } }).cause?.code ?? error.message}` : String(error), ...state };
+    }
   }
 
   /** Single title check, used for detail pages. */

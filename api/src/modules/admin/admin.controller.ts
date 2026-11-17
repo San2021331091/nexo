@@ -9,6 +9,7 @@ import { PostgresService } from '../database/postgres.service';
 import { AdminGuard } from './admin.guard';
 import { ChannelHealthService } from '../channels/channel-health.service';
 import { validatePlaybackUrl } from '../playback/url-validator';
+import { EmbedAvailabilityService } from '../playback/embed-availability.service';
 import { randomUUID } from 'node:crypto';
 
 class ActiveBody { @IsBoolean() active!: boolean; }
@@ -26,7 +27,7 @@ const isYouTube = (url: string) => ['youtube.com','www.youtube.com','youtu.be','
 @UseGuards(AdminGuard)
 @ApiBearerAuth()
 export class AdminController {
-  constructor(private readonly channels: ChannelRepository, private readonly db: PostgresService, private readonly providers: PlaybackProviders, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService) {}
+  constructor(private readonly channels: ChannelRepository, private readonly db: PostgresService, private readonly providers: PlaybackProviders, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService) {}
   private providerSummary() { const status = this.providers.status(); const enabled = [this.tmdb.configured ? 'TMDB' : '', status.superembed ? 'Superembed' : '',this.sports.channelIds.length ? 'YouTube sports' : ''].filter(Boolean); return enabled.length ? enabled.join(' · ') : 'Manual sources only'; }
   @Get('session') session(): { data: { authenticated: true } } { return { data: { authenticated: true } }; }
   @Get('overview') async overview(): Promise<{ data: { channels: number; movies: number; series: number; providerStatus: string } }> { const [channels,movies,series]=await Promise.all([this.channels.count(),this.db.query<{count:string}>('SELECT COUNT(*)::text AS count FROM movies'),this.db.query<{count:string}>('SELECT COUNT(*)::text AS count FROM series')]); return { data: { channels, movies:Number(movies.rows[0]?.count??0), series:Number(series.rows[0]?.count??0), providerStatus: this.providerSummary() } }; }
@@ -200,5 +201,7 @@ export class AdminController {
     if (!result.rowCount) throw new BadRequestException('Channel not found.');
     return { data: { id, active: body.active } };
   }
+  /** What the embed provider answers to this server for a title it is known to carry. */
+  @Get('embed-check') async embedCheck(@Query('kind') kind?: string) { return { data: await this.availability.diagnose(kind === 'tv' ? 'tv' : 'movie') }; }
   @Get('settings') settings() { const status = this.providers.status(); return { data: { database: Boolean(process.env.DATABASE_URL), manualPlayback: true, tmdb: this.tmdb.configured, superembed: status.superembed, superembedHost: status.superembedHost, sportsYouTubeChannels: this.sports.channelIds.length, playbackAllowlist: (process.env.PLAYBACK_ALLOWED_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean).length } }; }
 }
