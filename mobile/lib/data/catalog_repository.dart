@@ -1,14 +1,23 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get_storage/get_storage.dart';
 
 import '../domain/entities/catalog_item.dart';
 import '../domain/repositories/catalog_repository.dart' as domain;
 
-/// `--dart-define=API_BASE_URL=...` wins. Otherwise the Android emulator reaches
-/// the host machine through 10.0.2.2; a physical device needs the define.
+/// Reads a setting from the bundled `.env` file (loaded in main), then from
+/// `--dart-define`, so a build flag can still override the file.
+String _setting(String name, String fromDefine) {
+  if (fromDefine.isNotEmpty) return fromDefine;
+  return dotenv.isInitialized ? (dotenv.maybeGet(name) ?? '').trim() : '';
+}
+
+/// API_BASE_URL from `.env` (e.g. https://nexo-iota-jet.vercel.app/api/v1). Without
+/// it the Android emulator reaches the host machine's local API through 10.0.2.2.
 String _apiBaseUrl() {
-  const configured = String.fromEnvironment('API_BASE_URL');
+  final configured = _setting(
+      'API_BASE_URL', const String.fromEnvironment('API_BASE_URL'));
   if (configured.isNotEmpty) return configured;
   final emulatorHost =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -17,16 +26,17 @@ String _apiBaseUrl() {
       : 'http://localhost:4000/api/v1';
 }
 
-/// `--dart-define=APP_API_KEY=...`: one of the API's APP_API_KEYS. The production API
+/// APP_API_KEY from `.env`: one of the API's APP_API_KEYS. The production API
 /// rejects requests without it; a local API without APP_API_KEYS accepts them.
-const _apiKey = String.fromEnvironment('APP_API_KEY');
+String _apiKey() =>
+    _setting('APP_API_KEY', const String.fromEnvironment('APP_API_KEY'));
 
 class CatalogRepository implements domain.CatalogRepository {
   CatalogRepository({Dio? client, GetStorage? storage})
       : _client = client ??
             Dio(BaseOptions(
                 baseUrl: _apiBaseUrl(),
-                headers: {if (_apiKey.isNotEmpty) 'X-API-Key': _apiKey},
+                headers: {if (_apiKey().isNotEmpty) 'X-API-Key': _apiKey()},
                 connectTimeout: const Duration(seconds: 8),
                 receiveTimeout: const Duration(seconds: 25))),
         _storage = storage ?? GetStorage();

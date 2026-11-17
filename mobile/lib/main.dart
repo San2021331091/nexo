@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:go_router/go_router.dart';
 
@@ -16,6 +17,9 @@ import 'features/shorts/shorts_page.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await GetStorage.init();
+  // API_BASE_URL and APP_API_KEY (see .env.example). Optional so a build without
+  // the file still starts against the local development API.
+  await dotenv.load(fileName: '.env', isOptional: true);
   final repository = CatalogRepository();
   runApp(BlocProvider(
       create: (_) => CatalogCubit(repository)..load(), child: const NexoApp()));

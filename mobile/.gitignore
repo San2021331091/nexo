@@ -22,7 +22,6 @@ android/key.properties
 **/*.keystore
 
 # Environment
-dart_defines.json
 .env
 .env.*
 !.env.example
