@@ -15,7 +15,6 @@ type Stats = { channels: number; movies: number; series: number; providerStatus:
 export default function Dashboard({ stats }: { stats: Stats }) {
   const path = usePathname();
   const router = useRouter();
-  const reportEmail = process.env.NEXT_PUBLIC_CONTENT_REPORT_EMAIL;
   const navigation = (compact = false) => <nav className={compact ? 'flex gap-2 overflow-x-auto px-4 py-3 md:hidden' : 'space-y-2'}>
     {nav.map(([label, href, icon]) => <Link key={href} href={href} className={`${compact ? 'shrink-0' : 'flex'} items-center gap-3 rounded-xl px-4 py-3 text-sm ${path === href ? 'bg-pink/15 text-pink' : 'text-muted hover:bg-white/5 hover:text-white'}`}>
       <span aria-hidden="true">{icon}</span>{label}
@@ -37,7 +36,7 @@ export default function Dashboard({ stats }: { stats: Stats }) {
         <div className="mt-7 grid gap-4 sm:grid-cols-3">{[['Live channels', stats.channels, 'From the existing Neon tables'], ['Movies', stats.movies, 'Catalog titles, including drafts'], ['Web series', stats.series, 'Catalog titles, including drafts']].map(([label, value, caption]) => <article key={String(label)} className="rounded-2xl border border-white/8 bg-panel p-5"><p className="text-sm text-muted">{label}</p><p className="mt-4 text-3xl font-semibold">{stats.apiAvailable ? value : '—'}</p><p className="mt-2 text-xs text-muted">{caption}</p></article>)}</div>
         <div className="mt-7 grid gap-4 lg:grid-cols-[1.3fr_.7fr]">
           <section className="rounded-2xl border border-white/8 bg-panel p-6"><div className="flex items-center justify-between"><h3 className="font-semibold">Catalog health</h3><span className={`rounded-full px-3 py-1 text-xs ${stats.apiAvailable ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200'}`}>{stats.apiAvailable ? 'API reachable' : 'API unavailable'}</span></div><div className="mt-5 space-y-4 text-sm"><div className="flex justify-between border-b border-white/5 pb-4"><span className="text-muted">Channel/category source</span><span>Existing Neon tables</span></div><div className="flex justify-between border-b border-white/5 pb-4"><span className="text-muted">Movies and series</span><span>Separate catalog tables</span></div><div className="flex justify-between"><span className="text-muted">Playback providers</span><span className="text-muted">Manual authorized URLs</span></div></div></section>
-          <section className="rounded-2xl border border-white/8 bg-panel p-6"><h3 className="font-semibold">Availability</h3><p className="mt-3 text-sm leading-relaxed text-muted">{stats.providerStatus}. Content availability depends on rights and the source provider.</p>{reportEmail ? <a className="mt-5 inline-block text-sm text-pink underline decoration-pink/40 underline-offset-4" href={`mailto:${reportEmail}?subject=Content%20availability%20report`}>Report a content issue →</a> : <p className="mt-5 text-xs text-muted">Configure NEXT_PUBLIC_CONTENT_REPORT_EMAIL to enable content reports.</p>}</section>
+          <section className="rounded-2xl border border-white/8 bg-panel p-6"><h3 className="font-semibold">Availability</h3><p className="mt-3 text-sm leading-relaxed text-muted">{stats.providerStatus}. Content availability depends on rights and the source provider.</p></section>
         </div>
       </div>
     </main>

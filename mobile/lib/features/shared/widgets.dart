@@ -3,13 +3,11 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../domain/entities/catalog_item.dart';
 import '../shorts/shorts_page.dart';
 
-const _reportEmail = String.fromEnvironment('CONTENT_REPORT_EMAIL');
 
 /// Opens the right screen for an item: details for titles, the player otherwise.
 void openItem(BuildContext context, CatalogItem item) {
@@ -635,17 +633,5 @@ class RightsNote extends StatelessWidget {
             child: Text(
                 'Availability depends on rights and the source provider.',
                 style: TextStyle(color: kMuted, fontSize: 11, height: 1.4))),
-        if (_reportEmail.isNotEmpty)
-          TextButton(
-              onPressed: () async {
-                await launchUrl(Uri(
-                    scheme: 'mailto',
-                    path: _reportEmail,
-                    queryParameters: {
-                      'subject': 'Content availability report'
-                    }));
-              },
-              child: const Text('Report',
-                  style: TextStyle(color: kPink, fontSize: 11))),
       ]));
 }

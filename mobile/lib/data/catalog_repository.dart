@@ -17,11 +17,16 @@ String _apiBaseUrl() {
       : 'http://localhost:4000/api/v1';
 }
 
+/// `--dart-define=APP_API_KEY=...`: one of the API's APP_API_KEYS. The production API
+/// rejects requests without it; a local API without APP_API_KEYS accepts them.
+const _apiKey = String.fromEnvironment('APP_API_KEY');
+
 class CatalogRepository implements domain.CatalogRepository {
   CatalogRepository({Dio? client, GetStorage? storage})
       : _client = client ??
             Dio(BaseOptions(
                 baseUrl: _apiBaseUrl(),
+                headers: {if (_apiKey.isNotEmpty) 'X-API-Key': _apiKey},
                 connectTimeout: const Duration(seconds: 8),
                 receiveTimeout: const Duration(seconds: 25))),
         _storage = storage ?? GetStorage();

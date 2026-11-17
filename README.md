@@ -16,7 +16,7 @@ The mobile app does not ask viewers to sign in. My List stays on the device and 
 2. Copy `apps/admin/.env.example` to `apps/admin/.env.local`. Set `ADMIN_LOGIN_USERNAME` and a strong `ADMIN_LOGIN_PASSWORD` for the operator, then copy the same `ADMIN_API_TOKEN` from the API environment. The admin login form accepts only the operator username and password; the API token stays in server configuration. `API_BASE_URL` (server only) points the admin at a separately running API such as the Nest dev server on `:4000`; leave it unset to run the API inside the admin app.
 3. From the repository root, run `npm install`, then `npm run db:inspect` to inspect the existing database. Apply the additive catalog migration with `npm run db:migrate` (details below).
 4. Run `npm run dev` to start the API and admin panel, or start `npm run api:dev` and `npm run admin:dev` in separate terminals.
-5. For the mobile app, run `cd apps/mobile`, `flutter pub get`, then `flutter run`. On the Android emulator the app reaches the API at `http://10.0.2.2:4000/api/v1` by default. For a physical device, pass the machine's LAN address: `flutter run --dart-define=API_BASE_URL=http://192.168.x.x:4000/api/v1`. Add `--dart-define=CONTENT_REPORT_EMAIL=content@example.com` to show a report link.
+5. For the mobile app, run `cd apps/mobile`, `flutter pub get`, then `flutter run`. On the Android emulator the app reaches the API at `http://10.0.2.2:4000/api/v1` by default. For a physical device, pass the machine's LAN address: `flutter run --dart-define=API_BASE_URL=http://192.168.x.x:4000/api/v1`.
 
 ## Database and seed data
 
@@ -49,7 +49,7 @@ Movies and series added by hand in the admin panel still work and appear in a "F
 
 The home feed is built by `GET /api/v1/home?tab=all|live|sports|movies|series|dramas`, which returns a hero list and ordered sections (channel circles, poster rails, ranked rails, video rails). TMDB and YouTube responses are cached in memory, so a provider outage leaves the live channel rails intact.
 
-Missing or invalid playback sources show a friendly unavailable state. Catalog pages include a content availability note and can enable a report link with `CONTENT_REPORT_EMAIL` for Flutter and `NEXT_PUBLIC_CONTENT_REPORT_EMAIL` for the admin UI.
+Missing or invalid playback sources show a friendly unavailable state. Catalog pages include a content availability note.
 
 ## Admin security
 
@@ -71,9 +71,10 @@ The admin app and the API deploy together as one Vercel project on one domain. T
 
 Vercel setup:
 
-- Import the repository and set **Root Directory** to `apps/admin`. `apps/admin/vercel.json` installs from the workspace root, and `npm run build` builds the API first (`prebuild`) and then Next.js.
-- Environment variables (all server only): `DATABASE_URL`, `ADMIN_API_TOKEN`, `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `TMDB_API_KEY`, and optionally `CORS_ORIGINS`, `PLAYBACK_ALLOWED_HOSTS`, `VIDSRC_BASE_URL`, `SUPEREMBED_BASE_URL`, `SPORTS_YOUTUBE_CHANNELS`. Do **not** set `API_BASE_URL`.
-- Point Flutter at the deployment: `--dart-define=API_BASE_URL=https://<your-domain>/api/v1`.
+- Import the repository and set **Root Directory** to `admin`. `admin/vercel.json` installs from the workspace root, and `npm run build` builds the API first (`prebuild`) and then Next.js.
+- Environment variables (all server only): `DATABASE_URL`, `ADMIN_API_TOKEN`, `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `TMDB_API_KEY`, `APP_API_KEYS`, and optionally `CORS_ORIGINS`, `PLAYBACK_ALLOWED_HOSTS`, `VIDSRC_BASE_URL`, `SUPEREMBED_BASE_URL`, `SPORTS_YOUTUBE_CHANNELS`. Do **not** set `API_BASE_URL`.
+- Point Flutter at the deployment with its key: `flutter build apk --dart-define-from-file=dart_defines.json`, where that (git-ignored) file holds `API_BASE_URL` (`https://<your-domain>/api/v1`) and `APP_API_KEY` (one of `APP_API_KEYS`).
+- API access: every `/api/v1` request except `/health` needs `X-API-Key: <one of APP_API_KEYS>` or `Authorization: Bearer <ADMIN_API_TOKEN>`, otherwise it gets `401`. Without `APP_API_KEYS` the API is open in development and answers `503` in production.
 - Run `npm run db:migrate` once so the `channel_health` table exists. Stream check results are stored there and shared by every function instance.
 - Channel health checks: set `CRON_SECRET` (a random string of 16+ characters) in Vercel. Vercel Cron then calls `/api/cron/channel-health` on the schedule in `apps/admin/vercel.json`. Each call checks channels for up to 240 seconds, oldest results first, so later calls pick up where it stopped. The default schedule is daily (`0 5 * * *`) because Hobby plans only allow daily crons; on Pro, change it to e.g. `*/15 * * * *`. Serverless functions do not run the in-process timer.
 - Swagger (`/docs`) is only served by the standalone API (`npm run api:dev`).

@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
+import { appKeyMiddleware } from './app-key';
 
 export const GLOBAL_PREFIX = 'api/v1';
 
@@ -20,7 +21,13 @@ export function configureApp(app: INestApplication, options: { swagger?: boolean
     if (searchWindows.size > 10_000) for (const [ip, item] of searchWindows) if (now - item.start >= 60_000) searchWindows.delete(ip);
     next();
   });
-  app.enableCors({ origin: (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((v) => v.trim()), credentials: true });
+  // CORS_ORIGINS="*" (the default) lets any website call the API from a browser. Clients
+  // authenticate with Bearer tokens, not cookies, so credentials are not needed for "*".
+  // A comma separated list restricts browser access to those origins instead.
+  const corsOrigins = (process.env.CORS_ORIGINS ?? '*').split(',').map((v) => v.trim()).filter(Boolean);
+  app.enableCors(corsOrigins.length === 0 || corsOrigins.includes('*') ? { origin: '*' } : { origin: corsOrigins, credentials: true });
+  // After CORS so rejected requests still carry CORS headers and preflights are answered.
+  app.use(`/${GLOBAL_PREFIX}`, appKeyMiddleware());
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   if (options.swagger) {
     const swagger = new DocumentBuilder().setTitle('NEXO API').setDescription('Guest first streaming discovery catalog').setVersion('1.0').addBearerAuth().build();

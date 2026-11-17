@@ -6,7 +6,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
@@ -15,7 +14,6 @@ import '../../domain/entities/catalog_item.dart';
 import '../catalog/catalog_cubit.dart';
 import '../shared/widgets.dart';
 
-const _reportEmail = String.fromEnvironment('CONTENT_REPORT_EMAIL');
 // Matches the Android applicationId.
 const youtubeOrigin = 'https://com.nexo.nexo';
 const _youtubeHosts = {
@@ -813,22 +811,6 @@ class _PlayerPageState extends State<PlayerPage> {
                                 'Availability depends on rights and the source provider.',
                                 style: TextStyle(
                                     color: kMuted, fontSize: 12, height: 1.5)),
-                            if (_reportEmail.isNotEmpty)
-                              Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: TextButton.icon(
-                                      onPressed: () async {
-                                        await launchUrl(Uri(
-                                            scheme: 'mailto',
-                                            path: _reportEmail,
-                                            queryParameters: {
-                                              'subject':
-                                                  'Content availability report'
-                                            }));
-                                      },
-                                      icon: const Icon(Icons.flag_outlined),
-                                      label: const Text(
-                                          'Report a content issue'))),
                           ])),
                     ]);
                   }),
