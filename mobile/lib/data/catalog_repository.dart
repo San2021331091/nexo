@@ -193,6 +193,21 @@ class CatalogRepository implements domain.CatalogRepository {
   }
 
   @override
+  Future<FreeWatchOptions> freeWatchOptions(
+      {required String type, required String slug, String? region}) async {
+    final response = await _client.get<Map<String, dynamic>>('/watch/free',
+        queryParameters: {
+          'type': type,
+          'slug': slug,
+          if (region != null && region.isNotEmpty) 'region': region,
+        });
+    final data = response.data?['data'];
+    return data is Map
+        ? FreeWatchOptions.fromJson(Map<String, dynamic>.from(data))
+        : const FreeWatchOptions(region: '');
+  }
+
+  @override
   Future<List<CatalogItem>> saved() async {
     final values =
         _storage.read<List<dynamic>>('nexo.my_list') ?? const <dynamic>[];

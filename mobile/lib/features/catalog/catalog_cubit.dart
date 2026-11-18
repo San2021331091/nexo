@@ -158,6 +158,10 @@ class CatalogCubit extends Cubit<CatalogState> {
 
   Future<CatalogItem?> loadMovieDetails(String slug) => repository.movie(slug);
 
+  Future<FreeWatchOptions> freeWatchOptions(
+          {required String type, required String slug, String? region}) =>
+      repository.freeWatchOptions(type: type, slug: slug, region: region);
+
   Future<({CatalogItem? series, List<CatalogSeason> seasons})> loadSeriesPage(
       String slug) async {
     final values = await Future.wait<dynamic>([

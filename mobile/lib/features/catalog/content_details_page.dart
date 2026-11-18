@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../../domain/entities/catalog_item.dart';
@@ -127,6 +128,19 @@ class _DetailBody extends StatefulWidget {
 
 class _DetailBodyState extends State<_DetailBody> {
   int _season = 0;
+  late final Future<FreeWatchOptions?> _freeWatchOptions = _loadFreeWatchOptions();
+
+  Future<FreeWatchOptions?> _loadFreeWatchOptions() {
+    final request = tmdbPlaybackRequest(widget.item.id);
+    if (request == null || request.type != 'movie') return Future.value(null);
+    final region = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    return context.read<CatalogCubit>().freeWatchOptions(
+        type: 'movie',
+        slug: widget.item.slug,
+        region: region != null && RegExp(r'^[A-Za-z]{2}$').hasMatch(region)
+            ? region.toUpperCase()
+            : 'BD');
+  }
 
   CatalogItem _episodeItem(CatalogSeason season, CatalogEpisode episode) =>
       CatalogItem(
@@ -262,6 +276,10 @@ class _DetailBodyState extends State<_DetailBody> {
                   : item.synopsis,
               style: const TextStyle(
                   height: 1.55, fontSize: 15, color: Colors.white70)),
+          if (!isSeries && tmdbPlaybackRequest(item.id)?.type == 'movie') ...[
+            const SizedBox(height: 22),
+            _FreeWatchOptionsPanel(future: _freeWatchOptions),
+          ],
         ]),
       ),
       if (isSeries) ...[
@@ -293,6 +311,63 @@ class _DetailBodyState extends State<_DetailBody> {
       const SizedBox(height: 28),
     ]);
   }
+}
+
+class _FreeWatchOptionsPanel extends StatelessWidget {
+  const _FreeWatchOptionsPanel({required this.future});
+  final Future<FreeWatchOptions?> future;
+
+  Future<void> _open(String? value) async {
+    if (value == null) return;
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.scheme != 'https' || uri.host != 'www.themoviedb.org') return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<FreeWatchOptions?>(
+        future: future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done || !snapshot.hasData) {
+            return const SizedBox.shrink();
+          }
+          final options = snapshot.data!;
+          if (options.region.isEmpty) return const SizedBox.shrink();
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Watch free in ${options.region}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            if (options.providers.isEmpty)
+              Text('No free or ad-supported options were found in ${options.region}.',
+                  style: const TextStyle(color: Colors.white70))
+            else ...[
+              Text('Free and ad-supported services',
+                  style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final provider in options.providers)
+                  Chip(
+                    avatar: provider.logoUrl == null
+                        ? const Icon(Icons.play_circle_outline, size: 18)
+                        : Artwork(url: provider.logoUrl, label: provider.name, cacheWidth: 72),
+                    label: Text('${provider.name}${provider.kind == 'ads' ? ' · Ads' : ''}'),
+                    backgroundColor: kPanel,
+                    side: BorderSide.none,
+                  ),
+              ]),
+              if (options.link != null) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () => _open(options.link),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('View availability on TMDB'),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                ),
+              ],
+            ],
+          ]);
+        },
+      );
 }
 
 class _EpisodeTile extends StatelessWidget {

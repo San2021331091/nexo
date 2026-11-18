@@ -33,6 +33,8 @@ abstract interface class CatalogRepository {
   /// title has none or the request fails.
   Future<List<PlaybackServer>> playbackSources(
       {required String type, required int tmdbId, int? season, int? episode});
+  Future<FreeWatchOptions> freeWatchOptions(
+      {required String type, required String slug, String? region});
   Future<List<CatalogItem>> saved();
   Future<void> save(CatalogItem item);
   Future<void> remove(String id);

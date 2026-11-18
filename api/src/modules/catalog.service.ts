@@ -45,11 +45,14 @@ export class CatalogService {
 
   async home(tab: HomeTab = 'all') {
     const feed = await this.feed(tab);
-    // Only titles whose embed the provider confirmed are shown; one check covers every rail.
-    const kept = new Set(await this.availability.keepPlayable([...feed.hero, ...feed.sections.flatMap((section) => section.items)]));
-    const hero = feed.hero.filter((item) => kept.has(item)).slice(0, 8);
+    // Keep TMDB movies visible so the detail page can offer official watch options
+    // when Superembed does not carry them. Series still require a confirmed embed.
+    const titles = [...feed.hero, ...feed.sections.flatMap((section) => section.items)];
+    const kept = new Set(await this.availability.keepPlayable(titles.filter((item) => item.type !== 'movie')));
+    const visible = (item: Item) => item.type === 'movie' || kept.has(item);
+    const hero = feed.hero.filter(visible).slice(0, 8);
     const sections = feed.sections
-      .map((section) => { const items = section.items.filter((item) => kept.has(item)); return { ...section, items: section.style === 'ranked' ? items.slice(0, 10) : items }; })
+      .map((section) => { const items = section.items.filter(visible); return { ...section, items: section.style === 'ranked' ? items.slice(0, 10) : items }; })
       .filter((section) => section.items.length);
     return { data: { tab, hero, sections, availabilityNote: AVAILABILITY_NOTE } };
   }
@@ -200,8 +203,8 @@ export class CatalogService {
       this.safe(this.content.seriesList({ limit: 50, q: query, genre: filters.genre, language: filters.language, year: filters.year }).then((result) => result.data as Item[]), []),
       this.tmdb.searchMovies(query), this.tmdb.searchSeries(query),
     ]);
-    const [playableMovies, playableSeries] = await Promise.all([this.availability.keepPlayable(tmdbMovies), this.availability.keepPlayable(tmdbSeries)]);
-    const data = [...channels, ...movies, ...series, ...playableMovies.slice(0, 15), ...playableSeries.slice(0, 15)];
+    const playableSeries = await this.availability.keepPlayable(tmdbSeries);
+    const data = [...channels, ...movies, ...series, ...tmdbMovies.slice(0, 15), ...playableSeries.slice(0, 15)];
     return { data, meta: { query: q, count: data.length } };
   }
 
@@ -211,12 +214,12 @@ export class CatalogService {
     const remote: Item[] = query.q?.trim() ? await this.tmdb.searchMovies(query.q.trim(), page)
       : query.genre || query.language || query.year ? await this.tmdb.discoverMovies({ genre: query.genre, language: query.language, year: query.year, page, sort: query.list === 'top_rated' ? 'vote_average.desc' : undefined })
       : await this.tmdb.movieList(query.list ?? 'popular', page);
-    // hasMore follows TMDB's page size, not how many titles passed the embed check.
-    const data = [...local, ...(await this.availability.keepPlayable(remote))];
+    // Keep movie metadata visible even when Superembed has no copy; details link to official free options.
+    const data = [...local, ...remote];
     return { data, meta: { count: data.length, page, limit: data.length, hasMore: remote.length >= 15 } };
   }
 
-  async movieBySlug(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.movieBySlug(slug); return (await this.availability.isPlayable('movie', id)) ? this.tmdb.movie(id) : null; }
+  async movieBySlug(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.movieBySlug(slug); return this.tmdb.movie(id); }
 
   /** Numbered playback servers for a TMDB movie or episode; the player asks for these. */
   async playbackSources(request: PlaybackRequest) {

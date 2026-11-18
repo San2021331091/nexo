@@ -186,6 +186,11 @@ class _FakeCatalogRepository implements CatalogRepository {
           int? episode}) async =>
       const [];
 
+  @override
+  Future<FreeWatchOptions> freeWatchOptions(
+          {required String type, required String slug, String? region}) async =>
+      FreeWatchOptions(region: region ?? 'BD');
+
   final item = const CatalogItem(
       id: 'news-1',
       slug: 'news-one',

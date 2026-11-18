@@ -188,6 +188,38 @@ class PlaybackServer {
   }
 }
 
+class FreeWatchProvider {
+  const FreeWatchProvider({required this.id, required this.name, this.logoUrl, required this.kind});
+  final int id;
+  final String name;
+  final String? logoUrl;
+  final String kind;
+
+  factory FreeWatchProvider.fromJson(Map<String, dynamic> json) => FreeWatchProvider(
+        id: int.tryParse('${json['id'] ?? ''}') ?? 0,
+        name: '${json['name'] ?? ''}',
+        logoUrl: CatalogItem._string(json['logoUrl']),
+        kind: '${json['kind'] ?? 'free'}',
+      );
+}
+
+class FreeWatchOptions {
+  const FreeWatchOptions({required this.region, this.link, this.providers = const []});
+  final String region;
+  final String? link;
+  final List<FreeWatchProvider> providers;
+
+  factory FreeWatchOptions.fromJson(Map<String, dynamic> json) => FreeWatchOptions(
+        region: '${json['region'] ?? ''}',
+        link: CatalogItem._string(json['link']),
+        providers: (json['providers'] as List? ?? const <dynamic>[])
+            .whereType<Map<dynamic, dynamic>>()
+            .map((item) => FreeWatchProvider.fromJson(Map<String, dynamic>.from(item)))
+            .where((provider) => provider.id > 0 && provider.name.isNotEmpty)
+            .toList(),
+      );
+}
+
 /// The TMDB title a player id refers to (`tmdb-movie-550`,
 /// `tmdb-tv-201072-s1e1`), or null for channels and other content.
 ({String type, int tmdbId, int? season, int? episode})? tmdbPlaybackRequest(
