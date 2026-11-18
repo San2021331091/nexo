@@ -38,7 +38,7 @@ abstract interface class CatalogRepository {
       {required String type, required String slug, String? region});
   /// Asks NEXO Assistant; throws [AssistantException] with a message to show.
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
-      {String? region});
+      {String? region, List<String> memory = const []});
   Future<List<CatalogItem>> saved();
   Future<void> save(CatalogItem item);
   Future<void> remove(String id);

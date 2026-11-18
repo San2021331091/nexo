@@ -178,7 +178,7 @@ void _playbackServerTests() {
 class _FakeCatalogRepository implements CatalogRepository {
   @override
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
-          {String? region}) async =>
+          {String? region, List<String> memory = const []}) async =>
       const AssistantMessage(role: 'assistant', content: 'ok');
 
   @override

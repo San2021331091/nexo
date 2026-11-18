@@ -210,7 +210,7 @@ class CatalogRepository implements domain.CatalogRepository {
 
   @override
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
-      {String? region}) async {
+      {String? region, List<String> memory = const []}) async {
     try {
       final response =
           await _client.post<Map<String, dynamic>>('/assistant/chat',
@@ -223,6 +223,7 @@ class CatalogRepository implements domain.CatalogRepository {
                 ],
                 if (region != null && RegExp(r'^[A-Za-z]{2}$').hasMatch(region))
                   'region': region.toUpperCase(),
+                if (memory.isNotEmpty) 'memory': memory.take(30).toList(),
               },
               // The assistant may look several things up before it answers.
               options: Options(receiveTimeout: const Duration(seconds: 40)));
