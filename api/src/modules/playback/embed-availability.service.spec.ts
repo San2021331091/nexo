@@ -49,9 +49,9 @@ describe('EmbedAvailabilityService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('leaves out titles it could not check and does not store them', async () => {
+  it('keeps titles it could not check and does not store them', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
-    expect(await service.keepPlayable([{ tmdbId: 9, type: 'movie' }])).toEqual([]);
+    expect(await service.keepPlayable([{ tmdbId: 9, type: 'movie' }])).toEqual([{ tmdbId: 9, type: 'movie' }]);
     expect(db.query.mock.calls.some(([sql]) => String(sql).startsWith('INSERT'))).toBe(false);
   });
 
@@ -66,7 +66,8 @@ describe('EmbedAvailabilityService', () => {
   it('treats everything as unknown while the provider is throttling', async () => {
     const fetchMock = jest.fn(() => Promise.resolve(page(MISSING)));
     global.fetch = fetchMock as unknown as typeof fetch;
-    expect(await service.keepPlayable([{ tmdbId: 12, type: 'series' }, { tmdbId: 13, type: 'series' }, { tmdbId: 14, type: 'series' }, { tmdbId: 15, type: 'series' }, { tmdbId: 16, type: 'series' }])).toEqual([]);
+    const items = [12, 13, 14, 15, 16].map((tmdbId) => ({ tmdbId, type: 'series' }));
+    expect(await service.keepPlayable(items)).toEqual(items);
     // Nothing is stored as missing, and checking pauses after the canary fails.
     expect(db.query.mock.calls.some(([sql]) => String(sql).startsWith('INSERT'))).toBe(false);
     const calls = fetchMock.mock.calls.length;

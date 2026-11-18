@@ -180,11 +180,13 @@ export class EmbedAvailabilityService {
       await Promise.race([workers, new Promise((resolve) => setTimeout(resolve, budgetMs).unref?.())]);
     }
     const result = new Map<string, boolean>();
-    for (const target of unique) result.set(key(target.kind, target.id), this.known(target.kind, target.id) === true);
+    // Only a confirmed "missing" answer hides a title. When the provider cannot be reached
+    // (blocked, throttled, timed out) titles stay listed instead of every rail going empty.
+    for (const target of unique) result.set(key(target.kind, target.id), this.known(target.kind, target.id) !== false);
     return result;
   }
 
-  /** Keeps non TMDB items and TMDB items whose embed is confirmed playable. */
+  /** Keeps non TMDB items and TMDB items not confirmed missing by the embed provider. */
   async keepPlayable<T extends Item>(items: T[], budgetMs?: number): Promise<T[]> {
     const targets = items.map(embedTarget).filter((target): target is { kind: EmbedKind; id: number } => Boolean(target));
     if (!targets.length) return items;
