@@ -1,3 +1,4 @@
+import '../entities/assistant.dart';
 import '../entities/catalog_item.dart';
 
 abstract interface class CatalogRepository {
@@ -35,6 +36,9 @@ abstract interface class CatalogRepository {
       {required String type, required int tmdbId, int? season, int? episode});
   Future<FreeWatchOptions> freeWatchOptions(
       {required String type, required String slug, String? region});
+  /// Asks NEXO Assistant; throws [AssistantException] with a message to show.
+  Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
+      {String? region});
   Future<List<CatalogItem>> saved();
   Future<void> save(CatalogItem item);
   Future<void> remove(String id);

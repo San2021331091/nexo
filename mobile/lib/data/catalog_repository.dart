@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get_storage/get_storage.dart';
 
+import '../domain/entities/assistant.dart';
 import '../domain/entities/catalog_item.dart';
 import '../domain/repositories/catalog_repository.dart' as domain;
 
@@ -195,16 +196,57 @@ class CatalogRepository implements domain.CatalogRepository {
   @override
   Future<FreeWatchOptions> freeWatchOptions(
       {required String type, required String slug, String? region}) async {
-    final response = await _client.get<Map<String, dynamic>>('/watch/free',
-        queryParameters: {
-          'type': type,
-          'slug': slug,
-          if (region != null && region.isNotEmpty) 'region': region,
-        });
+    final response = await _client
+        .get<Map<String, dynamic>>('/watch/free', queryParameters: {
+      'type': type,
+      'slug': slug,
+      if (region != null && region.isNotEmpty) 'region': region,
+    });
     final data = response.data?['data'];
     return data is Map
         ? FreeWatchOptions.fromJson(Map<String, dynamic>.from(data))
         : const FreeWatchOptions(region: '');
+  }
+
+  @override
+  Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
+      {String? region}) async {
+    try {
+      final response =
+          await _client.post<Map<String, dynamic>>('/assistant/chat',
+              data: {
+                'messages': [
+                  for (final turn in history.length > 20
+                      ? history.sublist(history.length - 20)
+                      : history)
+                    turn.toJson()
+                ],
+                if (region != null && RegExp(r'^[A-Za-z]{2}$').hasMatch(region))
+                  'region': region.toUpperCase(),
+              },
+              // The assistant may look several things up before it answers.
+              options: Options(receiveTimeout: const Duration(seconds: 40)));
+      final data = response.data?['data'];
+      final reply = data is Map
+          ? AssistantMessage.fromReply(Map<String, dynamic>.from(data))
+          : null;
+      if (reply == null || reply.content.isEmpty) {
+        throw const AssistantException('No answer came back. Try again.');
+      }
+      return reply;
+    } on DioException catch (error) {
+      final body = error.response?.data;
+      final message = body is Map ? body['message'] : null;
+      throw AssistantException(switch (error.response?.statusCode) {
+        429 => 'You have asked a lot of questions. Please wait a few minutes.',
+        503 when message is String => message,
+        _
+            when error.type == DioExceptionType.receiveTimeout ||
+                error.type == DioExceptionType.connectionTimeout =>
+          'That took too long. Please try again.',
+        _ => 'Could not reach NEXO Assistant. Check your connection.',
+      });
+    }
   }
 
   @override

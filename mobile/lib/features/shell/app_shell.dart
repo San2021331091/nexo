@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../assistant/assistant_page.dart';
 import '../discover/discover_page.dart';
 import '../home/home_page.dart';
 import '../live/live_page.dart';
@@ -11,13 +12,18 @@ const _destinations = [
   (label: 'Live TV', icon: Icons.live_tv_outlined, activeIcon: Icons.live_tv),
   (label: 'Discover', icon: Icons.search, activeIcon: Icons.search),
   (
+    label: 'Ask AI',
+    icon: Icons.auto_awesome_outlined,
+    activeIcon: Icons.auto_awesome
+  ),
+  (
     label: 'My List',
     icon: Icons.bookmarks_outlined,
     activeIcon: Icons.bookmarks
   ),
 ];
 
-/// The root scaffold: four destinations behind a persistent bottom bar.
+/// The root scaffold: five destinations behind a persistent bottom bar.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
   @override
@@ -42,7 +48,10 @@ class _AppShellState extends State<AppShell> {
             _visited.contains(2)
                 ? const DiscoverPage()
                 : const SizedBox.shrink(),
-            _visited.contains(3) ? const MyListPage() : const SizedBox.shrink(),
+            _visited.contains(3)
+                ? const AssistantPage()
+                : const SizedBox.shrink(),
+            _visited.contains(4) ? const MyListPage() : const SizedBox.shrink(),
           ]),
           bottomNavigationBar: _BottomBar(
               index: _index,

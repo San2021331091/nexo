@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexo/domain/entities/assistant.dart';
 import 'package:nexo/domain/entities/catalog_item.dart';
 import 'package:nexo/domain/repositories/catalog_repository.dart';
 import 'package:nexo/features/catalog/catalog_cubit.dart';
@@ -175,6 +176,11 @@ void _playbackServerTests() {
 }
 
 class _FakeCatalogRepository implements CatalogRepository {
+  @override
+  Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
+          {String? region}) async =>
+      const AssistantMessage(role: 'assistant', content: 'ok');
+
   @override
   Future<String?> channelYoutubeLive(String slug) async => null;
 
