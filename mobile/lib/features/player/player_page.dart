@@ -35,6 +35,26 @@ String? youtubeVideoId(Uri uri) {
   return id != null && RegExp(r'^[\w-]{6,20}$').hasMatch(id) ? id : null;
 }
 
+/// Hosts that servers other than Server 1 may load. Server 1 is the app's
+/// existing source and is checked like any playback URL.
+const _extraServerHosts = {'archive.org', 'api.esportex.site', ..._youtubeHosts};
+
+/// Whether a playback server's URL may be opened: HTTPS, no credentials, and
+/// for added servers an allowlisted host.
+bool serverAllowed(PlaybackServer server) {
+  final uri = Uri.tryParse(server.url);
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    return false;
+  }
+  return server.provider == 'default' ||
+      (server.provider == 'embedsportex'
+          ? uri.host.toLowerCase() == 'api.esportex.site'
+          : _extraServerHosts.contains(uri.host.toLowerCase()));
+}
+
 /// Plays a live stream (HLS), a YouTube video, or a provider embed in-app.
 class PlayerPage extends StatefulWidget {
   const PlayerPage(
@@ -44,6 +64,7 @@ class PlayerPage extends StatefulWidget {
       this.url,
       this.type = 'channel',
       this.playbackKind = 'hls',
+      this.playbackServers = const [],
       this.category = '',
       this.trailerUrl,
       this.startFullscreen = false});
@@ -57,6 +78,7 @@ class PlayerPage extends StatefulWidget {
   final bool startFullscreen;
   final String type;
   final String playbackKind;
+  final List<PlaybackServer> playbackServers;
   final String category;
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -80,6 +102,14 @@ class _PlayerPageState extends State<PlayerPage> {
   double _volume = _storedVolume();
   bool _muted = _storedMuted();
   bool _fallbackTried = false;
+  // Numbered servers for TMDB titles; empty means only widget.url is played.
+  List<PlaybackServer> _servers = const [];
+  int _server = 0;
+  // The server picked last, kept for the next episode or title that has it.
+  static String? _preferredProvider;
+
+  String? get _currentUrl =>
+      _servers.isEmpty ? widget.url : _servers[_server].url;
 
   bool get _isLive => widget.type == 'channel';
 
@@ -87,7 +117,54 @@ class _PlayerPageState extends State<PlayerPage> {
   void initState() {
     super.initState();
     if (widget.startFullscreen) _setFullscreen(true);
-    _init();
+    _start();
+  }
+
+  /// Loads the title's servers first when it is a TMDB movie or episode.
+  Future<void> _start() async {
+    if (widget.playbackServers.isNotEmpty) {
+      _servers = widget.playbackServers.where(serverAllowed).toList();
+    }
+    final request = tmdbPlaybackRequest(widget.id);
+    if (request != null && widget.playbackKind == 'iframe') {
+      try {
+        final servers = (await context
+                .read<CatalogCubit>()
+                .repository
+                .playbackSources(
+                    type: request.type,
+                    tmdbId: request.tmdbId,
+                    season: request.season,
+                    episode: request.episode))
+            .where(serverAllowed)
+            .toList();
+        if (!mounted) return;
+        if (servers.isNotEmpty) {
+          final preferred = servers
+              .indexWhere((server) => server.provider == _preferredProvider);
+          _servers = servers;
+          _server = preferred < 0 ? 0 : preferred;
+        }
+      } catch (_) {}
+    }
+    await _init();
+  }
+
+  /// Plays another server for the same movie or episode.
+  Future<void> _selectServer(int index) async {
+    if (index == _server || index < 0 || index >= _servers.length) return;
+    _preferredProvider = _servers[index].provider;
+    await _video?.dispose();
+    await _youtube?.close();
+    setState(() {
+      _server = index;
+      _video = null;
+      _youtube = null;
+      _embed = null;
+      _error = null;
+      _loading = true;
+    });
+    await _init();
   }
 
   Uri? _safeUri(String? raw) {
@@ -102,7 +179,7 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Future<void> _init() async {
-    final uri = _safeUri(widget.url);
+    final uri = _safeUri(_currentUrl);
     if (uri == null) {
       setState(() => _loading = false);
       return;
@@ -180,6 +257,11 @@ class _PlayerPageState extends State<PlayerPage> {
             origin: youtubeOrigin));
     // The player only accepts volume once it has loaded; apply it then.
     controller.listen((value) {
+      // Deleted, private, region restricted or not embeddable videos.
+      if (value.error != YoutubeError.none && _youtube == controller) {
+        _youtubeUnavailable(value.error);
+        return;
+      }
       if (value.playerState == PlayerState.playing && !_youtubeVolumeSet) {
         _youtubeVolumeSet = true;
         _applyVolume();
@@ -189,6 +271,20 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   bool _youtubeVolumeSet = false;
+
+  void _youtubeUnavailable(YoutubeError error) {
+    if (!mounted) return;
+    final failed = _youtube;
+    setState(() {
+      _youtube = null;
+      _error = error == YoutubeError.videoNotFound
+          ? 'This video was removed or is private.'
+          : error == YoutubeError.invalidParam
+              ? 'This YouTube link is invalid.'
+              : "This video can't be played in the app.";
+    });
+    failed?.close();
+  }
 
   /// When a live channel's own stream fails, plays the channel's YouTube
   /// live stream instead, if it has one. Returns whether that worked.
@@ -415,6 +511,7 @@ class _PlayerPageState extends State<PlayerPage> {
       );
 
   Widget _embedView(Uri uri) => InAppWebView(
+        key: ValueKey(uri.toString()),
         initialUrlRequest: URLRequest(url: WebUri.uri(uri)),
         initialSettings: InAppWebViewSettings(
           javaScriptEnabled: true,
@@ -463,7 +560,9 @@ class _PlayerPageState extends State<PlayerPage> {
     if (!mounted || _embed == null) return;
     setState(() {
       _embed = null;
-      _error = 'This title is not available from the source right now.';
+      _error = _servers.length > 1
+          ? 'This server does not have the title right now. Try another server.'
+          : 'This title is not available from the source right now.';
     });
   }
 
@@ -505,7 +604,7 @@ class _PlayerPageState extends State<PlayerPage> {
               style: const TextStyle(color: Colors.white70))),
       const SizedBox(height: 8),
       Wrap(spacing: 8, alignment: WrapAlignment.center, children: [
-        if (widget.url != null)
+        if (_currentUrl != null)
           TextButton(onPressed: _retry, child: const Text('Retry')),
         if (_hasTrailer)
           TextButton.icon(
@@ -739,6 +838,23 @@ class _PlayerPageState extends State<PlayerPage> {
                                     fontSize: 22,
                                     height: 1.2,
                                     fontWeight: FontWeight.w700)),
+                            if (_servers.length > 1)
+                              Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        for (var i = 0;
+                                            i < _servers.length;
+                                            i++)
+                                          ChoiceChip(
+                                              label: Text(_servers[i].label),
+                                              selected: i == _server,
+                                              selectedColor: kPink,
+                                              onSelected: (_) =>
+                                                  _selectServer(i)),
+                                      ])),
                             if (_usingYoutubeFallback)
                               const Padding(
                                   padding: EdgeInsets.only(top: 10),

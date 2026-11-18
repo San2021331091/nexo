@@ -11,6 +11,7 @@ import { ChannelHealthService } from '../channels/channel-health.service';
 import { validatePlaybackUrl } from '../playback/url-validator';
 import { EmbedAvailabilityService } from '../playback/embed-availability.service';
 import { randomUUID } from 'node:crypto';
+import { YouTubeLibraryService } from '../library/youtube-library.service';
 
 class ActiveBody { @IsBoolean() active!: boolean; }
 class CategoryBody { @IsOptional() @IsString() @MaxLength(160) name?: string; @IsOptional() @IsString() @MaxLength(2048) imageUrl?: string; }
@@ -27,7 +28,7 @@ const isYouTube = (url: string) => ['youtube.com','www.youtube.com','youtu.be','
 @UseGuards(AdminGuard)
 @ApiBearerAuth()
 export class AdminController {
-  constructor(private readonly channels: ChannelRepository, private readonly db: PostgresService, private readonly providers: PlaybackProviders, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService) {}
+  constructor(private readonly channels: ChannelRepository, private readonly db: PostgresService, private readonly providers: PlaybackProviders, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService, private readonly library: YouTubeLibraryService) {}
   private providerSummary() { const status = this.providers.status(); const enabled = [this.tmdb.configured ? 'TMDB' : '', status.superembed ? 'Superembed' : '',this.sports.channelIds.length ? 'YouTube sports' : ''].filter(Boolean); return enabled.length ? enabled.join(' · ') : 'Manual sources only'; }
   @Get('session') session(): { data: { authenticated: true } } { return { data: { authenticated: true } }; }
   @Get('overview') async overview(): Promise<{ data: { channels: number; movies: number; series: number; providerStatus: string } }> { const [channels,movies,series]=await Promise.all([this.channels.count(),this.db.query<{count:string}>('SELECT COUNT(*)::text AS count FROM movies'),this.db.query<{count:string}>('SELECT COUNT(*)::text AS count FROM series')]); return { data: { channels, movies:Number(movies.rows[0]?.count??0), series:Number(series.rows[0]?.count??0), providerStatus: this.providerSummary() } }; }
@@ -46,6 +47,9 @@ export class AdminController {
     await this.health.run({ budgetMs: seconds * 1000 });
     return { data: this.health.summary() };
   }
+  /** Adds today's full episodes and movies from the official YouTube channels (the daily Vercel cron calls this). */
+  @Post('youtube-library/sync') async syncYouTubeLibrary() { return { data: await this.library.sync() }; }
+  @Get('youtube-library') youtubeLibraryStatus() { return { data: this.library.status }; }
   @Get('channels') async listChannels(): Promise<{ data: import('../channels/channel.types').Channel[] }> { return { data: await this.channels.list(MAX_CHANNELS) }; }
   @Get('categories') async listCategories(): Promise<{ data: Array<{ id: string; name: string; imageUrl: string | null }> }> { return { data: await this.channels.categories() }; }
   @Get('movies') async listMovies(): Promise<{data: Record<string,unknown>[]}> { const result=await this.db.query<Record<string,unknown>>('SELECT * FROM movies ORDER BY created_at DESC LIMIT 100'); return {data:result.rows}; }

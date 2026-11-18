@@ -5,6 +5,8 @@ import 'package:nexo/features/catalog/catalog_cubit.dart';
 import 'package:nexo/features/player/player_page.dart';
 
 void main() {
+  _playbackServerTests();
+
   test('catalog DTO parses channel fields without requiring artwork', () {
     final item = CatalogItem.fromJson({
       'id': 'news-1',
@@ -131,9 +133,58 @@ void main() {
   });
 }
 
+void _playbackServerTests() {
+  test('player ids map to TMDB movie and episode requests', () {
+    expect(tmdbPlaybackRequest('tmdb-movie-550'),
+        (type: 'movie', tmdbId: 550, season: null, episode: null));
+    expect(tmdbPlaybackRequest('tmdb-tv-201072-s1e2'),
+        (type: 'tv', tmdbId: 201072, season: 1, episode: 2));
+    expect(tmdbPlaybackRequest('news-1'), isNull);
+    expect(tmdbPlaybackRequest('tmdb-movie-550-trailer'), isNull);
+  });
+
+  test('playback servers parse and only allowlisted hosts are opened', () {
+    final server = PlaybackServer.fromJson({
+      'label': 'Server 2',
+      'provider': 'internet-archive',
+      'url': 'https://archive.org/embed/TheGeneral'
+    })!;
+    expect(server.label, 'Server 2');
+    expect(serverAllowed(server), isTrue);
+    expect(PlaybackServer.fromJson({'label': 'Server 3'}), isNull);
+    expect(
+        serverAllowed(const PlaybackServer(
+            label: 'Server 2',
+            provider: 'internet-archive',
+            url: 'https://evil.example/embed/x')),
+        isFalse);
+    expect(
+        serverAllowed(const PlaybackServer(
+            label: 'Server 2',
+            provider: 'internet-archive',
+            url: 'http://archive.org/embed/x')),
+        isFalse);
+    // Server 1 is the app's existing source and keeps its own host.
+    expect(
+        serverAllowed(const PlaybackServer(
+            label: 'Server 1',
+            provider: 'default',
+            url: 'https://embed.example/?video_id=550&tmdb=1')),
+        isTrue);
+  });
+}
+
 class _FakeCatalogRepository implements CatalogRepository {
   @override
   Future<String?> channelYoutubeLive(String slug) async => null;
+
+  @override
+  Future<List<PlaybackServer>> playbackSources(
+          {required String type,
+          required int tmdbId,
+          int? season,
+          int? episode}) async =>
+      const [];
 
   final item = const CatalogItem(
       id: 'news-1',

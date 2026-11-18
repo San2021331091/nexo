@@ -16,8 +16,8 @@ String _setting(String name, String fromDefine) {
 /// API_BASE_URL from `.env` (e.g. https://nexo-iota-jet.vercel.app/api/v1). Without
 /// it the Android emulator reaches the host machine's local API through 10.0.2.2.
 String _apiBaseUrl() {
-  final configured = _setting(
-      'API_BASE_URL', const String.fromEnvironment('API_BASE_URL'));
+  final configured =
+      _setting('API_BASE_URL', const String.fromEnvironment('API_BASE_URL'));
   if (configured.isNotEmpty) return configured;
   final emulatorHost =
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -165,6 +165,31 @@ class CatalogRepository implements domain.CatalogRepository {
     final data = response.data?['data'];
     final url = data is Map ? data['playbackUrl'] : null;
     return url is String && url.isNotEmpty ? url : null;
+  }
+
+  @override
+  Future<List<PlaybackServer>> playbackSources(
+      {required String type,
+      required int tmdbId,
+      int? season,
+      int? episode}) async {
+    try {
+      final response = await _client
+          .get<Map<String, dynamic>>('/playback/sources', queryParameters: {
+        'type': type,
+        'tmdbId': tmdbId,
+        if (season != null) 'season': season,
+        if (episode != null) 'episode': episode,
+      });
+      return (response.data?['data'] as List? ?? const <dynamic>[])
+          .whereType<Map<dynamic, dynamic>>()
+          .map((item) =>
+              PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
+          .whereType<PlaybackServer>()
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   @override

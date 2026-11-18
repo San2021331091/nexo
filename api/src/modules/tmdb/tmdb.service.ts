@@ -35,6 +35,42 @@ export function genreId(kind: 'movie' | 'tv', genre: string | undefined): number
   return match ? Number(match[0]) : null;
 }
 
+export interface FreeProvider { id: number; name: string; logoUrl: string | null; kind: 'free' | 'ads' }
+export interface FreeWatchOptions { region: string; link: string | null; providers: FreeProvider[] }
+
+/** A two letter country code, or US when the value is missing or malformed. */
+export function watchRegion(value: string | undefined): string {
+  const code = (value ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : 'US';
+}
+
+/**
+ * The services that stream a title at no cost in one country, from a
+ * `/watch/providers` response (data supplied to TMDB by JustWatch). Only the
+ * `free` and `ads` groups are kept; subscription, rent and buy are left out.
+ * Exported for tests.
+ */
+export function parseFreeProviders(body: Row | null, region: string): FreeWatchOptions {
+  const results = (body?.results ?? null) as Record<string, Row> | null;
+  const country = results && typeof results === 'object' ? results[region] : undefined;
+  const rawLink = typeof country?.link === 'string' ? country.link : '';
+  let link: string | null = null;
+  try { const url = new URL(rawLink); if (url.protocol === 'https:' && /(^|\.)themoviedb\.org$/.test(url.hostname)) link = url.toString(); } catch { link = null; }
+  const seen = new Set<number>();
+  const providers: FreeProvider[] = [];
+  for (const kind of ['free', 'ads'] as const) {
+    const group = Array.isArray(country?.[kind]) ? (country[kind] as Row[]) : [];
+    for (const row of [...group].sort((a, b) => Number(a.display_priority ?? 999) - Number(b.display_priority ?? 999))) {
+      const id = Number(row.provider_id);
+      const name = typeof row.provider_name === 'string' ? row.provider_name.trim() : '';
+      if (!Number.isInteger(id) || id <= 0 || !name || seen.has(id)) continue;
+      seen.add(id);
+      providers.push({ id, name, logoUrl: image(row.logo_path, 'w92'), kind });
+    }
+  }
+  return { region, link: providers.length ? link : null, providers };
+}
+
 /** Slugs for TMDB sourced titles look like `tmdb-550`. */
 export function tmdbIdFromSlug(slug: string): number | null {
   const match = /^tmdb-(\d{1,9})$/.exec(slug);
@@ -119,6 +155,11 @@ export class TmdbService {
   async series(id: number) { const row = await this.get(`/tv/${id}`, { append_to_response: 'videos' }, DETAIL_TTL); return row?.id && !row.adult ? { ...this.seriesItem(row), trailerUrl: trailerUrl(row) } : null; }
 
   /** Seasons with their aired episodes; each episode carries its Superembed embed. */
+  /** Free and ad supported services for a movie or series in one country. */
+  async freeWatch(kind: 'movie' | 'tv', id: number, region: string): Promise<FreeWatchOptions> {
+    return parseFreeProviders(await this.get(`/${kind}/${id}/watch/providers`, {}, DETAIL_TTL), region);
+  }
+
   async seasons(id: number) {
     const show = await this.get(`/tv/${id}`, {}, DETAIL_TTL);
     if (!show?.id) return [];

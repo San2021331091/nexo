@@ -64,6 +64,8 @@ Useful database commands:
 
 ## Playback and content rights
 
+The Sports tab uses the EmbedSportex schedule API for live and upcoming events across its listed sports categories. Its returned iframe server links are shown as selectable playback servers. The API cache is 45 seconds to stay within the provider's polling guidance. Operators remain responsible for rights to content they make available.
+
 Each kind of content has one source:
 
 | Content | Source | Player |
@@ -71,7 +73,7 @@ Each kind of content has one source:
 | Live channels | `channeltb.liveurl` (HLS) | `video_player` |
 | Movies | TMDB listing, Superembed embed by TMDB id | in-app WebView |
 | Web series and dramas | TMDB listing and episode guide, Superembed embed by TMDB id | in-app WebView |
-| Sports videos | Uploads feed of the channels in `SPORTS_YOUTUBE_CHANNELS` | official YouTube IFrame Player |
+| Sports schedule and live events | EmbedSportex `/api/streams`, plus uploads from `SPORTS_YOUTUBE_CHANNELS` | EmbedSportex iframe servers and official YouTube IFrame Player |
 
 The API requires HTTPS for every playback URL and rejects URLs with embedded credentials. `PLAYBACK_ALLOWED_HOSTS` is an optional extra restriction; when it is empty, any HTTPS stream URL stored in the catalog plays. Embed URLs are built only by the API's playback module from `SUPEREMBED_BASE_URL` (default `https://multiembed.mov`). This third-party service moves domains from time to time: change the base URL if it stops loading, or set it to `off` to disable it.
 
@@ -79,7 +81,7 @@ TMDB titles are listed only when Superembed confirms it has them: movies are che
 
 Movies and series added by hand in the admin panel still work and appear in a "Featured on NEXO" rail; their playback URL is whatever the operator enters.
 
-The home feed is built by `GET /api/v1/home?tab=all|live|sports|movies|series|dramas`, which returns a hero list and ordered sections (channel circles, poster rails, ranked rails, video rails). TMDB and YouTube responses are cached in memory, so a provider outage leaves the live channel rails intact.
+The home feed is built by `GET /api/v1/home?tab=all|live|sports|movies|series|dramas`, which returns a hero list and ordered sections (channel circles, poster rails, ranked rails, video rails). TMDB, YouTube, and EmbedSportex responses are cached in memory, so a provider outage leaves the live channel rails intact.
 
 Missing or invalid playback sources show a friendly unavailable state. Catalog pages include a content availability note.
 

@@ -9,6 +9,7 @@ class CatalogItem {
     this.backdropUrl,
     this.playbackUrl,
     this.playbackKind = 'unavailable',
+    this.playbackServers = const [],
     this.trailerUrl,
     this.type = 'channel',
     this.synopsis = '',
@@ -28,6 +29,7 @@ class CatalogItem {
   final String? backdropUrl;
   final String? playbackUrl;
   final String playbackKind;
+  final List<PlaybackServer> playbackServers;
 
   /// A YouTube trailer link; only sent with movie and series details.
   final String? trailerUrl;
@@ -59,6 +61,11 @@ class CatalogItem {
             json['playbackUrl'] ?? json['playback_url'] ?? json['liveurl']),
         playbackKind:
             '${json['playbackKind'] ?? json['playback_kind'] ?? 'unavailable'}',
+        playbackServers: (json['playbackServers'] as List? ?? const <dynamic>[])
+            .whereType<Map<dynamic, dynamic>>()
+            .map((item) => PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
+            .whereType<PlaybackServer>()
+            .toList(),
         trailerUrl: _string(json['trailerUrl']),
         type: '${json['type'] ?? 'channel'}',
         synopsis: '${json['synopsis'] ?? json['description'] ?? ''}',
@@ -82,6 +89,9 @@ class CatalogItem {
         'backdropUrl': backdropUrl,
         'playbackUrl': playbackUrl,
         'playbackKind': playbackKind,
+        'playbackServers': playbackServers
+            .map((server) => {'label': server.label, 'provider': server.provider, 'url': server.url})
+            .toList(),
         'trailerUrl': trailerUrl,
         'type': type,
         'synopsis': synopsis,
@@ -156,6 +166,50 @@ class CatalogEpisode {
         playbackKind:
             '${json['playbackKind'] ?? json['playback_kind'] ?? 'unavailable'}',
       );
+}
+
+/// One numbered playback server for a title ("Server 1" is the default source).
+class PlaybackServer {
+  const PlaybackServer(
+      {required this.label, required this.provider, required this.url});
+  final String label;
+
+  /// `default` for the app's existing source, otherwise the adapter name.
+  final String provider;
+  final String url;
+
+  static PlaybackServer? fromJson(Map<String, dynamic> json) {
+    final url = CatalogItem._string(json['url']);
+    if (url == null) return null;
+    return PlaybackServer(
+        label: '${json['label'] ?? 'Server'}',
+        provider: '${json['provider'] ?? 'default'}',
+        url: url);
+  }
+}
+
+/// The TMDB title a player id refers to (`tmdb-movie-550`,
+/// `tmdb-tv-201072-s1e1`), or null for channels and other content.
+({String type, int tmdbId, int? season, int? episode})? tmdbPlaybackRequest(
+    String id) {
+  final movie = RegExp(r'^tmdb-movie-(\d{1,9})$').firstMatch(id);
+  if (movie != null) {
+    return (
+      type: 'movie',
+      tmdbId: int.parse(movie[1]!),
+      season: null,
+      episode: null
+    );
+  }
+  final episode =
+      RegExp(r'^tmdb-tv-(\d{1,9})-s(\d{1,3})e(\d{1,4})$').firstMatch(id);
+  if (episode == null) return null;
+  return (
+    type: 'tv',
+    tmdbId: int.parse(episode[1]!),
+    season: int.parse(episode[2]!),
+    episode: int.parse(episode[3]!)
+  );
 }
 
 /// Where a section's "View All" leads: a filtered channel, movie or series grid.

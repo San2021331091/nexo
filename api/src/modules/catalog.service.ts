@@ -2,10 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { ChannelRepository, MAX_CHANNELS } from './channels/channel.repository';
 import { Channel } from './channels/channel.types';
 import { ContentRepository } from './catalog/content.repository';
-import { TmdbList, TmdbService, tmdbIdFromSlug } from './tmdb/tmdb.service';
+import { TmdbList, TmdbService, tmdbIdFromSlug, watchRegion } from './tmdb/tmdb.service';
 import { YouTubeFeedService } from './sports/youtube-feed.service';
 import { ChannelHealthService } from './channels/channel-health.service';
 import { EmbedAvailabilityService } from './playback/embed-availability.service';
+import { PlaybackRequest, PlaybackSourcesService } from './playback/playback-sources.service';
+import { YouTubeLibraryService } from './library/youtube-library.service';
+import { EmbedSportexService, SportexEvent } from './sports/embed-sportex.service';
 
 type Item = Record<string, unknown>;
 export type HomeTab = 'all' | 'live' | 'sports' | 'movies' | 'series' | 'dramas';
@@ -22,7 +25,7 @@ const AVAILABILITY_NOTE = 'Availability depends on rights and the source provide
 @Injectable()
 export class CatalogService {
   private channelCache: { expires: number; items: Channel[] } | null = null;
-  constructor(private readonly channels: ChannelRepository, private readonly content: ContentRepository, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService) {}
+  constructor(private readonly channels: ChannelRepository, private readonly content: ContentRepository, private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly embedSportex: EmbedSportexService, private readonly health: ChannelHealthService, private readonly availability: EmbedAvailabilityService, private readonly sources: PlaybackSourcesService, private readonly library: YouTubeLibraryService) {}
 
   /** Every playable channel, cached briefly so one home request reads the table once. */
   private async liveChannels(): Promise<Channel[]> {
@@ -65,8 +68,16 @@ export class CatalogService {
     }
 
     if (tab === 'sports') {
-      const [feeds, latest, shorts] = await Promise.all([this.sports.feeds(), this.sports.latest(8), this.sports.shorts(30)]);
+      const [feeds, latest, shorts, liveNow, sportexEvents] = await Promise.all([this.sports.feeds(), this.sports.latest(8), this.sports.shorts(30), this.safe(this.sports.liveNow(), []), this.safe(this.embedSportex.events(), [])]);
+      const bySport = new Map<string, SportexEvent[]>();
+      for (const event of sportexEvents) {
+        const category = event.category.split(' · ')[0] || 'Sports';
+        bySport.set(category, [...(bySport.get(category) ?? []), event]);
+      }
       return { hero: latest, sections: [
+        { id: 'sportex-live-now', title: 'EmbedSportex · Live Now', style: 'landscape', items: sportexEvents.filter((event) => event.live) as unknown as Item[] },
+        ...[...bySport].map(([sport, events]): HomeSection => ({ id: `sportex-${sport.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, title: `EmbedSportex · ${sport}`, style: 'landscape', items: events as unknown as Item[] })),
+        { id: 'sports-live-now', title: 'Live Now', style: 'landscape', items: liveNow as unknown as Item[] },
         this.channelRail('sports-channels', 'Sports Channels', this.inCategory(channels, 'Sports'), 'Sports'),
         { id: 'sports-shorts', title: 'Shorts', style: 'shorts', items: shorts as unknown as Item[] },
         ...feeds.map((feed): HomeSection => ({ id: `yt-${feed.channelId}`, title: feed.title, style: 'landscape', items: feed.items.slice(0, 15) as unknown as Item[] })),
@@ -74,17 +85,19 @@ export class CatalogService {
     }
 
     if (tab === 'movies') {
-      const [trending, popular, topRated, nowPlaying, action, comedy, thriller, horror, bollywood, bangla, local, reels] = await Promise.all([
+      const [trending, popular, topRated, nowPlaying, action, comedy, thriller, horror, bollywood, bangla, local, reels, fullMovies] = await Promise.all([
         movies('trending'), movies('popular'), movies('top_rated'), movies('now_playing'),
         this.tmdb.discoverMovies({ genre: 'Action' }), this.tmdb.discoverMovies({ genre: 'Comedy' }), this.tmdb.discoverMovies({ genre: 'Thriller' }), this.tmdb.discoverMovies({ genre: 'Horror' }),
         this.tmdb.discoverMovies({ language: 'hi' }), this.tmdb.discoverMovies({ language: 'bn' }),
         this.safe(this.content.movies({ limit: RAIL }).then((result) => result.data as Item[]), []),
         this.sports.reels('movies'),
+        this.safe(this.library.latest('movies'), []),
       ]);
       return { hero: trending, sections: [
         this.channelRail('movie-channels', 'Movie Channels', this.inCategory(channels, 'Movies'), 'Movies'),
         { id: 'local-movies', title: 'Featured on NEXO', style: 'posters', items: local },
         { id: 'movies-trending', title: 'Trending', style: 'posters', items: trending.slice(0, RAIL), viewAll: { kind: 'movies', list: 'trending' } },
+        { id: 'movies-full-youtube', title: 'Full Movies', style: 'landscape', items: fullMovies as unknown as Item[] },
         { id: 'movies-reels', title: 'Reels', style: 'shorts', items: reels as unknown as Item[] },
         { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popular },
         { id: 'movies-now', title: 'New on NEXO', style: 'posters', items: nowPlaying.slice(0, RAIL), viewAll: { kind: 'movies', list: 'now_playing' } },
@@ -99,15 +112,17 @@ export class CatalogService {
     }
 
     if (tab === 'series') {
-      const [trending, popular, topRated, crime, scifi, action, animation, local, reels] = await Promise.all([
+      const [trending, popular, topRated, crime, scifi, action, animation, local, reels, fullEpisodes] = await Promise.all([
         series('trending'), series('popular'), series('top_rated'),
         this.tmdb.discoverSeries({ genre: 'Crime' }), this.tmdb.discoverSeries({ genre: 'Sci-Fi & Fantasy' }), this.tmdb.discoverSeries({ genre: 'Action & Adventure' }), this.tmdb.discoverSeries({ genre: 'Animation' }),
         this.safe(this.content.seriesList({ limit: RAIL }).then((result) => result.data as Item[]), []),
         this.sports.reels('series'),
+        this.safe(this.library.latest('series'), []),
       ]);
       return { hero: trending, sections: [
         { id: 'local-series', title: 'Featured on NEXO', style: 'posters', items: local },
         { id: 'series-trending', title: 'Trending Series', style: 'posters', items: trending.slice(0, RAIL), viewAll: { kind: 'series', list: 'trending' } },
+        { id: 'series-full-youtube', title: 'Full Episodes', style: 'landscape', items: fullEpisodes as unknown as Item[] },
         { id: 'series-reels', title: 'Reels', style: 'shorts', items: reels as unknown as Item[] },
         { id: 'series-top-ten', title: 'Top Ten', style: 'ranked', items: popular },
         { id: 'series-crime', title: 'Crime', style: 'posters', items: crime.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Crime' } },
@@ -120,9 +135,10 @@ export class CatalogService {
 
     if (tab === 'dramas') {
       const drama = (language?: string) => this.tmdb.discoverSeries({ genre: 'Drama', language });
-      const [popular, korean, turkish, hindi, bangla, topRated, reels] = await Promise.all([drama(), drama('ko'), drama('tr'), drama('hi'), drama('bn'), this.tmdb.discoverSeries({ genre: 'Drama', sort: 'vote_average.desc' }), this.sports.reels('dramas')]);
+      const [popular, korean, turkish, hindi, bangla, topRated, reels, fullEpisodes] = await Promise.all([drama(), drama('ko'), drama('tr'), drama('hi'), drama('bn'), this.tmdb.discoverSeries({ genre: 'Drama', sort: 'vote_average.desc' }), this.sports.reels('dramas'), this.safe(this.library.latest('dramas'), [])]);
       return { hero: popular, sections: [
         { id: 'dramas-popular', title: 'Popular Dramas', style: 'posters', items: popular.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Drama' } },
+        { id: 'dramas-full-youtube', title: 'Full Episodes', style: 'landscape', items: fullEpisodes as unknown as Item[] },
         { id: 'dramas-reels', title: 'Reels', style: 'shorts', items: reels as unknown as Item[] },
         { id: 'dramas-korean', title: 'Korean Dramas', style: 'posters', items: korean.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Drama', language: 'ko' } },
         { id: 'dramas-turkish', title: 'Turkish Dramas', style: 'posters', items: turkish.slice(0, RAIL), viewAll: { kind: 'series', genre: 'Drama', language: 'tr' } },
@@ -132,10 +148,10 @@ export class CatalogService {
       ] };
     }
 
-    const [trendingMovies, popularMovies, topRated, trendingSeries, bollywood, action, dramas, highlights, shorts, curated] = await Promise.all([
+    const [trendingMovies, popularMovies, topRated, trendingSeries, bollywood, action, dramas, highlights, shorts, sportexEvents, curated] = await Promise.all([
       movies('trending'), movies('popular'), movies('top_rated'), series('trending'),
       this.tmdb.discoverMovies({ language: 'hi' }), this.tmdb.discoverMovies({ genre: 'Action' }), this.tmdb.discoverSeries({ genre: 'Drama' }),
-      this.sports.latest(12), this.sports.shorts(20), this.safe(this.curatedSections(channels), []),
+      this.sports.latest(12), this.sports.shorts(20), this.safe(this.embedSportex.events(), []), this.safe(this.curatedSections(channels), []),
     ]);
     // Alternate movies and series in the hero so both are represented.
     const hero: Item[] = [];
@@ -148,6 +164,7 @@ export class CatalogService {
       { id: 'movies-trending', title: 'Trending', style: 'posters', items: trendingMovies.slice(0, RAIL), viewAll: { kind: 'movies', list: 'trending' } },
       this.channelRail('sports-channels', 'Sports Channels', this.inCategory(channels, 'Sports'), 'Sports'),
       { id: 'sports-highlights', title: 'Sports Highlights', style: 'landscape', items: highlights as unknown as Item[] },
+      { id: 'sportex-live-now', title: 'EmbedSportex · Live Now', style: 'landscape', items: sportexEvents.filter((event) => event.live) as unknown as Item[] },
       { id: 'sports-shorts', title: 'Shorts', style: 'shorts', items: shorts as unknown as Item[] },
       { id: 'movies-top-ten', title: 'Top Ten', style: 'ranked', items: popularMovies },
       { id: 'series-trending', title: 'Trending Series', style: 'posters', items: trendingSeries.slice(0, RAIL), viewAll: { kind: 'series', list: 'trending' } },
@@ -200,6 +217,20 @@ export class CatalogService {
   }
 
   async movieBySlug(slug: string) { const id = tmdbIdFromSlug(slug); if (!id) return this.content.movieBySlug(slug); return (await this.availability.isPlayable('movie', id)) ? this.tmdb.movie(id) : null; }
+
+  /** Numbered playback servers for a TMDB movie or episode; the player asks for these. */
+  async playbackSources(request: PlaybackRequest) {
+    const movie = request.type === 'movie' ? await this.tmdb.movie(request.tmdbId) : null;
+    return this.sources.servers(request, movie ? { title: movie.title, year: movie.year } : undefined);
+  }
+
+  /** Where a TMDB title streams for free in the viewer's country. Local catalogue titles have no TMDB data. */
+  async freeWatch(type: 'movie' | 'tv', slug: string, region?: string) {
+    const id = tmdbIdFromSlug(slug);
+    const country = watchRegion(region);
+    if (!id) return { region: country, link: null, providers: [] };
+    return this.safe(this.tmdb.freeWatch(type, id, country), { region: country, link: null, providers: [] });
+  }
 
   async series(query: ContentQuery) {
     const page = query.page ?? 1;

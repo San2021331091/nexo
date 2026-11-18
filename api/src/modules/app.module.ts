@@ -13,6 +13,9 @@ import { EmbedAvailabilityService } from './playback/embed-availability.service'
 import { TmdbService } from './tmdb/tmdb.service';
 import { YouTubeFeedService } from './sports/youtube-feed.service';
 import { ChannelHealthService } from './channels/channel-health.service';
+import { PlaybackSourcesService } from './playback/playback-sources.service';
+import { YouTubeLibraryService } from './library/youtube-library.service';
+import { EmbedSportexService } from './sports/embed-sportex.service';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', 'apps/api/.env', '../api/.env'] })], controllers: [ChannelsController, CatalogController, AdminController], providers: [PostgresService, ChannelRepository, ContentRepository, PlaybackProviders, EmbedAvailabilityService, TmdbService, YouTubeFeedService, ChannelHealthService, CatalogService, AdminGuard] })
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', 'apps/api/.env', '../api/.env'] })], controllers: [ChannelsController, CatalogController, AdminController], providers: [PostgresService, ChannelRepository, ContentRepository, PlaybackProviders, PlaybackSourcesService, EmbedAvailabilityService, TmdbService, YouTubeFeedService, EmbedSportexService, YouTubeLibraryService, ChannelHealthService, CatalogService, AdminGuard] })
 export class AppModule {}

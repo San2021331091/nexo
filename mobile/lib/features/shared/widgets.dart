@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../domain/entities/catalog_item.dart';
 import '../shorts/shorts_page.dart';
-
 
 /// Opens the right screen for an item: details for titles, the player otherwise.
 void openItem(BuildContext context, CatalogItem item) {
@@ -29,6 +29,14 @@ String playerLocation(CatalogItem item) =>
       'type': item.type,
       'playbackKind': item.playbackKind,
       'category': item.category,
+      if (item.playbackServers.isNotEmpty)
+        'servers': jsonEncode(item.playbackServers
+            .map((server) => {
+                  'label': server.label,
+                  'provider': server.provider,
+                  'url': server.url,
+                })
+            .toList()),
       if (item.trailerUrl != null) 'trailer': item.trailerUrl,
     }).toString();
 

@@ -1,4 +1,11 @@
-import { parseLiveSearch, parseYouTubeFeed, parseYouTubeLink, sameBroadcaster } from './youtube-feed.service';
+import { parseLivePage, parseLiveSearch, parseYouTubeFeed, parseYouTubeLink, sameBroadcaster } from './youtube-feed.service';
+
+describe('parseLivePage', () => {
+  const page = (live: boolean) => `<link rel="canonical" href="https://www.youtube.com/watch?v=T9BfcJiy1L4"><meta name="title" content="LIVE | Spain v England &amp; more">${live ? '"isLiveNow":true' : '"isLiveNow":false'}`;
+  it('returns the broadcast when the channel is live now', () => expect(parseLivePage(page(true))).toEqual({ videoId: 'T9BfcJiy1L4', title: 'LIVE | Spain v England & more' }));
+  it('returns null for a past or upcoming stream', () => expect(parseLivePage(page(false))).toBeNull());
+  it('returns null for a channel page without a video', () => expect(parseLivePage('<link rel="canonical" href="https://www.youtube.com/channel/UCx">"isLiveNow":true')).toBeNull());
+});
 
 describe('sameBroadcaster', () => {
   it('matches names that differ only in case and noise words', () => {

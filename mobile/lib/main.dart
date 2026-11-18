@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -63,6 +65,7 @@ class _NexoAppState extends State<NexoApp> {
             type: state.uri.queryParameters['type'] ?? 'channel',
             playbackKind: state.uri.queryParameters['playbackKind'] ?? 'hls',
             category: state.uri.queryParameters['category'] ?? '',
+            playbackServers: _parsePlaybackServers(state.uri.queryParameters['servers']),
             trailerUrl: state.uri.queryParameters['trailer'],
             startFullscreen: state.uri.queryParameters['fullscreen'] == '1')),
     GoRoute(
@@ -80,6 +83,21 @@ class _NexoAppState extends State<NexoApp> {
   void dispose() {
     _router.dispose();
     super.dispose();
+  }
+
+  static List<PlaybackServer> _parsePlaybackServers(String? raw) {
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final values = jsonDecode(raw);
+      if (values is! List) return const [];
+      return values
+          .whereType<Map<dynamic, dynamic>>()
+          .map((item) => PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
+          .whereType<PlaybackServer>()
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   @override

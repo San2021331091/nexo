@@ -126,6 +126,15 @@ export function parseLiveSearch(html: string): LiveCandidate[] {
   return found;
 }
 
+/** The broadcast a channel's /live page is showing, or null when it is not live now. Exported for tests. */
+export function parseLivePage(html: string): { videoId: string; title: string } | null {
+  if (!html.includes('"isLiveNow":true')) return null;
+  const videoId = /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{6,20})"/.exec(html)?.[1];
+  if (!videoId) return null;
+  const title = decode(/<meta name="title" content="([^"]*)"/.exec(html)?.[1] ?? '').trim();
+  return { videoId, title: title || 'Live now' };
+}
+
 @Injectable()
 export class YouTubeFeedService {
   private readonly logger = new Logger(YouTubeFeedService.name);
@@ -244,6 +253,32 @@ export class YouTubeFeedService {
   /** Newest Shorts across every configured channel. */
   async shorts(limit = 30): Promise<SportsVideo[]> {
     return (await this.allFeeds()).flatMap((feed) => feed.shorts).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, limit);
+  }
+
+  private readonly liveNowCache = new Map<string, { expires: number; value: SportsVideo | null }>();
+
+  /** The official sports channel's current live broadcast, cached for a few minutes. */
+  private async channelLive(channelId: string, channelTitle: string): Promise<SportsVideo | null> {
+    const hit = this.liveNowCache.get(channelId);
+    if (hit && hit.expires > Date.now()) return hit.value;
+    let value: SportsVideo | null = null;
+    try {
+      const response = await fetch(`https://www.youtube.com/channel/${channelId}/live`, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en' }, signal: AbortSignal.timeout(8000) });
+      const live = response.ok ? parseLivePage(await response.text()) : null;
+      if (live) value = { id: `yt-live-${live.videoId}`, slug: `yt-live-${live.videoId}`, name: live.title, title: live.title, type: 'video', category: channelTitle, synopsis: 'Live now', posterUrl: null, backdropUrl: `https://i.ytimg.com/vi/${live.videoId}/hqdefault_live.jpg`, year: null, publishedAt: new Date().toISOString(), playbackUrl: `https://www.youtube.com/watch?v=${live.videoId}`, playbackKind: 'youtube' };
+    } catch (error) {
+      this.logger.warn(`YouTube live check ${channelId} failed: ${error instanceof Error ? error.name : 'error'}`);
+      return hit?.value ?? null;
+    }
+    this.liveNowCache.set(channelId, { expires: Date.now() + LIVE_TTL, value });
+    return value;
+  }
+
+  /** Broadcasts that the official sports channels are streaming right now. */
+  async liveNow(): Promise<SportsVideo[]> {
+    const feeds = new Map((await this.allFeeds()).map((feed) => [feed.channelId, feed.title]));
+    const live = await Promise.all(this.channelIds.map((id) => this.channelLive(id, feeds.get(id) ?? 'Sports')));
+    return live.filter((value): value is SportsVideo => Boolean(value));
   }
 
   /** Newest videos across every configured channel. */
