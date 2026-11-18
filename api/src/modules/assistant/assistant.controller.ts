@@ -8,6 +8,8 @@ class ChatTurnBody { @IsIn(['user', 'assistant']) role!: 'user' | 'assistant'; @
 class ChatBody {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => ChatTurnBody) messages!: ChatTurnBody[];
   @IsOptional() @IsString() @MaxLength(2) region?: string;
+  /** Facts remembered from earlier chats; the app keeps them on the device. */
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(200, { each: true }) memory?: string[];
 }
 
 const WINDOW_MS = 5 * 60_000;
@@ -36,6 +38,6 @@ export class AssistantController {
   @Post('chat') async chat(@Body() body: ChatBody, @Ip() ip: string) {
     if (body.messages[body.messages.length - 1].role !== 'user') throw new HttpException('The last message must be from the user.', HttpStatus.BAD_REQUEST);
     if (!this.limiter.allow(ip || 'unknown')) throw new HttpException('Too many questions. Please wait a few minutes.', HttpStatus.TOO_MANY_REQUESTS);
-    return { data: await this.assistant.chat(body.messages, body.region) };
+    return { data: await this.assistant.chat(body.messages, body.region, body.memory ?? []) };
   }
 }

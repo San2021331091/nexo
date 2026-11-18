@@ -25,6 +25,7 @@ const TOOLS = [
   { type: 'function', function: { name: 'trending', description: 'Current trending, popular, top rated, now playing or upcoming titles. For dramas, optionally filter by original language (ISO 639-1, e.g. ko, tr, hi, bn).', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['movies', 'series', 'dramas'] }, list: { type: 'string', enum: ['trending', 'popular', 'top_rated', 'now_playing', 'upcoming', 'on_the_air'] }, language: { type: 'string' } }, required: ['kind'] } } },
   { type: 'function', function: { name: 'title_details', description: 'Details for one title by TMDB id: overview, year, rating, genres, runtime, trailer, and which free services stream it in the viewer\'s country.', parameters: { type: 'object', properties: { type: { type: 'string', enum: ['movie', 'series'] }, tmdbId: { type: 'integer' } }, required: ['type', 'tmdbId'] } } },
   { type: 'function', function: { name: 'free_full_videos', description: 'Newest full episodes or full movies uploaded by official channels on YouTube, playable free in NEXO.', parameters: { type: 'object', properties: { group: { type: 'string', enum: ['movies', 'series', 'dramas'] } }, required: ['group'] } } },
+  { type: 'function', function: { name: 'save_memory', description: 'Remember a lasting fact about the viewer for future chats: favourite genres, languages, teams, actors, titles they loved or disliked, or anything they ask you to remember. One short fact per call, written in the third person (e.g. "Loves Korean romance dramas").', parameters: { type: 'object', properties: { fact: { type: 'string' } }, required: ['fact'] } } },
   { type: 'function', function: { name: 'sports_now', description: 'Sports broadcasts live right now on official channels, plus the latest official sports videos and highlights.', parameters: { type: 'object', properties: {} } } },
 ];
 
@@ -55,16 +56,24 @@ export class AssistantService {
   get configured() { return Boolean(process.env.OPENROUTER_API_KEY?.trim()); }
   private get model() { return process.env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL; }
 
-  private systemPrompt(region: string) {
+  private systemPrompt(region: string, memory: string[]) {
     const today = new Date().toISOString().slice(0, 10);
+    const remembered = memory.length ? ['What you remember about this viewer from earlier chats (use it to personalise; do not list it back unless asked):', ...memory.map((fact) => `- ${fact}`)] : [];
     return [
       `You are NEXO Assistant inside the NEXO streaming app. Today is ${today}. The viewer's country is ${region}.`,
       'You help people find movies, TV series, web series, dramas and sports, and answer questions about them.',
       'For anything current (what is trending, new, airing, live, or where to watch) call the tools first; never guess release dates, ratings, scores or schedules.',
       'If the tools do not have the answer, say so plainly. Do not make up titles, scores or fixtures.',
       'Only point people to NEXO and to official or licensed services. Never suggest pirate sites, torrents, or unofficial streams, and refuse requests for them.',
-      'Write in the language the viewer uses. Use plain text without markdown headings or tables; short lists with "•" are fine. Keep answers brief.',
+      'When the viewer shares a lasting preference or asks you to remember something, call save_memory, then say briefly that you will remember it.',
+      'Write in the language the viewer uses, formatted in Markdown like ChatGPT:',
+      '- Open with one short sentence that answers directly.',
+      '- Use "### " headings only to split longer answers into sections.',
+      '- Use numbered lists for rankings and "-" bullets for options. Put each title in **bold** with its year, then " — " and a one line reason, with rating, genre or channel on that line, e.g. 1. **Dune: Part Two** (2024) — ⭐ 8.2 · Sci-Fi · An epic sequel with stunning visuals.',
+      '- Keep it scannable: no walls of text, no tables, only a few emojis.',
+      '- End with one short follow-up question or suggestion in *italics*.',
       'Mention titles by their exact name so the app can show them as cards.',
+      ...remembered,
     ].join('\n');
   }
 
@@ -74,7 +83,7 @@ export class AssistantService {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY?.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'NEXO' },
-      body: JSON.stringify({ model: this.model, messages, max_tokens: 700, temperature: 0.4, ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}) }),
+      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}) }),
       signal: AbortSignal.timeout(remaining),
     });
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
@@ -84,7 +93,7 @@ export class AssistantService {
     return message;
   }
 
-  private async runTool(name: string, rawArgs: string, region: string): Promise<Item[] | Item> {
+  private async runTool(name: string, rawArgs: string, region: string, remembered: string[]): Promise<Item[] | Item> {
     let args: Record<string, unknown> = {};
     try { args = JSON.parse(rawArgs || '{}') as Record<string, unknown>; } catch { return { error: 'Arguments were not valid JSON.' }; }
     const kindOf = (value: unknown, allowed: string[], fallback: string) => (typeof value === 'string' && allowed.includes(value) ? value : fallback);
@@ -113,6 +122,12 @@ export class AssistantService {
       }
       case 'free_full_videos':
         return (await this.library.latest(kindOf(args.group, ['movies', 'series', 'dramas'], 'dramas') as LibraryGroup, 10)) as unknown as Item[];
+      case 'save_memory': {
+        const fact = text(args.fact, 200).replace(/\s+/g, ' ');
+        if (fact.length < 3) return { error: 'fact is required' };
+        if (remembered.length < 5) remembered.push(fact);
+        return { saved: true };
+      }
       case 'sports_now': {
         const [live, latest] = await Promise.all([this.sports.liveNow(), this.sports.latest(8)]);
         return [...live.map((item) => ({ ...item, synopsis: 'LIVE NOW' })), ...latest] as unknown as Item[];
@@ -123,11 +138,13 @@ export class AssistantService {
   }
 
   /** One assistant reply to the conversation, with the titles it mentions as playable cards. */
-  async chat(history: ChatTurn[], regionCode?: string): Promise<{ reply: string; items: Item[] }> {
+  async chat(history: ChatTurn[], regionCode?: string, memory: string[] = []): Promise<{ reply: string; items: Item[]; remembered: string[] }> {
     if (!this.configured) throw new ServiceUnavailableException('The assistant is not configured.');
     const region = watchRegion(regionCode);
     const deadline = Date.now() + BUDGET_MS;
-    const messages: Message[] = [{ role: 'system', content: this.systemPrompt(region) }, ...history.slice(-12).map((turn) => ({ role: turn.role, content: turn.content.slice(0, 2000) }))];
+    const facts = memory.map((fact) => text(fact, 200)).filter(Boolean).slice(0, 30);
+    const remembered: string[] = [];
+    const messages: Message[] = [{ role: 'system', content: this.systemPrompt(region, facts) }, ...history.slice(-12).map((turn) => ({ role: turn.role, content: turn.content.slice(0, 2000) }))];
     const found: Item[] = [];
     try {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
@@ -135,10 +152,10 @@ export class AssistantService {
         const calls = (message.tool_calls ?? []).filter((call) => call?.function?.name).slice(0, 4);
         if (!calls.length) {
           const reply = text(message.content, 4000) || "Sorry, I couldn't find an answer to that.";
-          return { reply, items: pickCards(reply, found) };
+          return { reply, items: pickCards(reply, found), remembered };
         }
         messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
-        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
+        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
         calls.forEach((call, index) => {
           const result = results[index];
           if (Array.isArray(result)) found.push(...result.filter((item) => item.id));
@@ -146,7 +163,7 @@ export class AssistantService {
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(forModel).slice(0, 6000) });
         });
       }
-      return { reply: "Sorry, that took too many steps. Try asking in a simpler way.", items: pickCards('', found) };
+      return { reply: "Sorry, that took too many steps. Try asking in a simpler way.", items: pickCards('', found), remembered };
     } catch (error) {
       this.logger.warn(`Assistant failed: ${error instanceof Error ? error.message : 'error'}`);
       throw new ServiceUnavailableException('The assistant is busy right now. Please try again.');

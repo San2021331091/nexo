@@ -53,6 +53,16 @@ describe('AssistantService.chat', () => {
     expect(second.messages[0].content).toContain('country is US');
   });
 
+  it('saves memories the model asks for and passes stored memory to the model', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [{ id: 'm1', type: 'function', function: { name: 'save_memory', arguments: '{"fact":"Loves Korean romance dramas"}' } }] }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: 'Got it, I will remember that.' }));
+    const result = await service.chat([{ role: 'user', content: 'I love Korean romance dramas' }], 'BD', ['Supports Barcelona']);
+    expect(result.remembered).toEqual(['Loves Korean romance dramas']);
+    const first = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { messages: { content: string }[] };
+    expect(first.messages[0].content).toContain('- Supports Barcelona');
+  });
+
   it('reports a clear error when OpenRouter fails', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 502 }));
     await expect(service.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow('busy');
