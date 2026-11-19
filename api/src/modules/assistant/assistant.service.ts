@@ -53,6 +53,38 @@ export function compactItem(item: Item) {
   };
 }
 
+// DeepSeek's own tool call markup (`<｜DSML｜invoke name="…">`, older
+// `<｜tool▁calls▁begin｜>`). OpenRouter normally turns it into tool_calls, but
+// some providers, or a turn without tools, let it through as plain text.
+const MARKER = String.raw`<\s*[|｜]\s*`;
+const TOOL_MARKUP = new RegExp(`${MARKER}(?:DSML|tool[▁_ ]?calls?|tool[▁_ ]?call[▁_ ]?begin)`, 'i');
+const INVOKE = new RegExp(`${MARKER}DSML\\s*[|｜]\\s*invoke\\s+name="([\\w-]+)"\\s*>([\\s\\S]*?)<\\/\\s*[|｜]\\s*DSML\\s*[|｜]\\s*invoke\\s*>`, 'gi');
+const PARAMETER = new RegExp(`${MARKER}DSML\\s*[|｜]\\s*parameter\\s+name="([\\w-]+)"([^>]*)>([\\s\\S]*?)<\\/\\s*[|｜]\\s*DSML\\s*[|｜]\\s*parameter\\s*>`, 'gi');
+
+/** Tool calls written as DeepSeek markup in the message text. Exported for tests. */
+export function leakedToolCalls(content: string | null | undefined): ToolCall[] {
+  if (!content || !TOOL_MARKUP.test(content)) return [];
+  const calls: ToolCall[] = [];
+  for (const invoke of content.matchAll(INVOKE)) {
+    const args: Record<string, unknown> = {};
+    for (const parameter of invoke[2].matchAll(PARAMETER)) {
+      const value = parameter[3].trim();
+      // string="false" marks a JSON value (number, boolean); everything else is text.
+      if (/string\s*=\s*"false"/i.test(parameter[2])) { try { args[parameter[1]] = JSON.parse(value); continue; } catch { /* keep as text */ } }
+      args[parameter[1]] = value;
+    }
+    calls.push({ id: `leaked-${calls.length + 1}`, type: 'function', function: { name: invoke[1], arguments: JSON.stringify(args) } });
+  }
+  return calls;
+}
+
+/** Message text without any tool call markup the model left in it. Exported for tests. */
+export function withoutToolMarkup(content: string | null | undefined): string {
+  if (!content) return '';
+  const match = TOOL_MARKUP.exec(content);
+  return (match ? content.slice(0, match.index) : content).trim();
+}
+
 /** The items whose titles the reply mentions; none when it names none, so unrelated results never show. Exported for tests. */
 export function pickCards(reply: string, items: Item[]): Item[] {
   const unique = [...new Map(items.map((item) => [String(item.id), item])).values()];
@@ -106,7 +138,8 @@ export class AssistantService {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY?.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'NEXO' },
-      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: toolsFor(this.offTools), tool_choice: 'auto' } : {}) }),
+      // require_parameters: only OpenRouter providers that really support tools.
+      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: toolsFor(this.offTools), tool_choice: 'auto', provider: { require_parameters: true } } : {}) }),
       signal: AbortSignal.timeout(remaining),
     });
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
@@ -211,14 +244,26 @@ export class AssistantService {
     const found: Item[] = [];
     const media: ChatMedia = { images: [], videos: [] };
     try {
+      let nudged = false;
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-        const message = await this.complete(messages, round < MAX_TOOL_ROUNDS, deadline);
-        const calls = (message.tool_calls ?? []).filter((call) => call?.function?.name).slice(0, 4);
+        const withTools = round < MAX_TOOL_ROUNDS;
+        const message = await this.complete(messages, withTools, deadline);
+        let calls = (message.tool_calls ?? []).filter((call) => call?.function?.name).slice(0, 4);
+        // Tool calls that came back as text are run like real ones.
+        if (!calls.length && withTools) calls = leakedToolCalls(message.content).slice(0, 4);
         if (!calls.length) {
-          const reply = text(message.content, 4000) || "Sorry, I couldn't find an answer to that.";
-          return { reply, items: pickCards(reply, found), remembered, media };
+          const reply = text(withoutToolMarkup(message.content), 4000);
+          if (reply) return { reply, items: pickCards(reply, found), remembered, media };
+          // Only markup and no answer: ask once more for plain text, without tools.
+          if (!nudged && deadline - Date.now() > 4_000) {
+            nudged = true;
+            messages.push({ role: 'system', content: 'Answer the viewer now in plain Markdown using what you already found. Do not call any tools.' });
+            round = MAX_TOOL_ROUNDS - 1;
+            continue;
+          }
+          return { reply: "Sorry, I couldn't put an answer together. Please try asking again.", items: [], remembered, media };
         }
-        messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
+        messages.push({ role: 'assistant', content: withoutToolMarkup(message.content) || null, tool_calls: calls });
         const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered, deadline, media).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
         calls.forEach((call, index) => {
           const result = results[index];

@@ -1,4 +1,4 @@
-import { AssistantService, compactItem, pickCards } from './assistant.service';
+import { AssistantService, compactItem, leakedToolCalls, pickCards, withoutToolMarkup } from './assistant.service';
 import { RateLimiter } from './assistant.controller';
 import { TmdbService } from '../tmdb/tmdb.service';
 import { YouTubeFeedService } from '../sports/youtube-feed.service';
@@ -29,6 +29,26 @@ describe('RateLimiter', () => {
   it('allows a fixed number of requests per window per address', () => {
     const limiter = new RateLimiter(2, 1000);
     expect([limiter.allow('a', 0), limiter.allow('a', 1), limiter.allow('a', 2), limiter.allow('b', 2), limiter.allow('a', 1500)]).toEqual([true, true, false, true, true]);
+  });
+});
+
+// The markup DeepSeek leaked as text in a real answer (fullwidth bars).
+const LEAKED = '<｜DSML｜tool_calls><｜DSML｜invoke name="search_titles"><｜DSML｜parameter name="kind" string="true">movie</｜DSML｜parameter><｜DSML｜parameter name="query" string="true">Amélie</｜DSML｜parameter></｜DSML｜invoke><｜DSML｜invoke name="title_details"><｜DSML｜parameter name="type" string="true">movie</｜DSML｜parameter><｜DSML｜parameter name="tmdbId" string="false">194</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>';
+
+describe('leaked DeepSeek tool calls', () => {
+  it('reads tool calls out of the markup, typed by the string attribute', () => {
+    const calls = leakedToolCalls(LEAKED);
+    expect(calls.map((call) => [call.function.name, JSON.parse(call.function.arguments)])).toEqual([
+      ['search_titles', { kind: 'movie', query: 'Amélie' }],
+      ['title_details', { type: 'movie', tmdbId: 194 }],
+    ]);
+  });
+  it('tolerates spaced bars and keeps text before the markup', () => {
+    const spaced = 'Let me check. < | DSML | tool_calls> < | DSML | invoke name="sports_now"> </ | DSML | invoke> </ | DSML | tool_calls>';
+    expect(leakedToolCalls(spaced).map((call) => call.function.name)).toEqual(['sports_now']);
+    expect(withoutToolMarkup(spaced)).toBe('Let me check.');
+    expect(withoutToolMarkup('Plain answer with | pipes.')).toBe('Plain answer with | pipes.');
+    expect(leakedToolCalls('Plain answer.')).toEqual([]);
   });
 });
 
@@ -115,6 +135,30 @@ describe('AssistantService.chat', () => {
     const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { tools: { function: { name: string } }[] };
     expect(body.tools.map((tool) => tool.function.name)).not.toEqual(expect.arrayContaining(['generate_image']));
     expect(body.tools.map((tool) => tool.function.name)).not.toEqual(expect.arrayContaining(['create_video']));
+  });
+
+  it('runs tool calls that came back as text and never shows the markup', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: LEAKED.replace(/<｜DSML｜invoke name="title_details">[\s\S]*?<\/｜DSML｜invoke>/, '') }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: '**Fight Club** (1999) is a sharp pick.' }));
+    const result = await service.chat([{ role: 'user', content: 'A feel-good movie for tonight' }]);
+    expect(result.reply).toBe('**Fight Club** (1999) is a sharp pick.');
+    expect(tmdb.searchMovies).toHaveBeenCalledWith('Amélie');
+    const second = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)) as { provider: object; messages: { role: string; content: string | null }[] };
+    expect(second.provider).toEqual({ require_parameters: true });
+    expect(JSON.stringify(second.messages)).not.toContain('DSML');
+  });
+
+  it('asks for plain text when the last turn is only markup', async () => {
+    const markupOnly = '<｜DSML｜tool_calls><｜DSML｜invoke name="trending"></｜DSML｜invoke></｜DSML｜tool_calls>';
+    jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [{ id: 'a', type: 'function', function: { name: 'search_titles', arguments: '{"query":"x"}' } }] }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [{ id: 'b', type: 'function', function: { name: 'search_titles', arguments: '{"query":"y"}' } }] }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [{ id: 'c', type: 'function', function: { name: 'search_titles', arguments: '{"query":"z"}' } }] }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: markupOnly }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: 'Try **Fight Club**.' }));
+    const result = await service.chat([{ role: 'user', content: 'something good' }]);
+    expect(result.reply).toBe('Try **Fight Club**.');
   });
 
   it('reports a clear error when OpenRouter fails', async () => {
