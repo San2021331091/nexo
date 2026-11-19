@@ -177,6 +177,10 @@ void _playbackServerTests() {
 
 class _FakeCatalogRepository implements CatalogRepository {
   @override
+  Future<GeneratedVideo> generatedVideo(String id) async =>
+      GeneratedVideo(id: id, status: 'done');
+
+  @override
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
           {String? region, List<String> memory = const []}) async =>
       const AssistantMessage(role: 'assistant', content: 'ok');

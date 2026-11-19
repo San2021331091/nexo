@@ -251,6 +251,14 @@ class CatalogRepository implements domain.CatalogRepository {
   }
 
   @override
+  Future<GeneratedVideo> generatedVideo(String id) async {
+    final response = await _client
+        .get<Map<String, dynamic>>('/media/videos/${Uri.encodeComponent(id)}');
+    return GeneratedVideo.fromJson(response.data?['data']) ??
+        GeneratedVideo(id: id, status: 'running');
+  }
+
+  @override
   Future<List<CatalogItem>> saved() async {
     final values =
         _storage.read<List<dynamic>>('nexo.my_list') ?? const <dynamic>[];

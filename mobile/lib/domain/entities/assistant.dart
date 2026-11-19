@@ -21,13 +21,78 @@ List<String> _strings(dynamic value) =>
         .where((item) => item.isNotEmpty)
         .toList();
 
+/// An image NEXO AI made: an HTTPS link, or inline `data:` JPEG bytes from
+/// the backup generator.
+class GeneratedImage {
+  const GeneratedImage({required this.url, this.shape = 'poster'});
+  final String url;
+
+  /// `poster` (2:3), `wide` (16:9) or `square`.
+  final String shape;
+
+  double get aspectRatio => switch (shape) {
+        'wide' => 16 / 9,
+        'square' => 1,
+        _ => 2 / 3,
+      };
+
+  bool get inline => url.startsWith('data:image/');
+
+  static GeneratedImage? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final url = '${json['url'] ?? ''}';
+    final ok = url.startsWith('https://') || url.startsWith('data:image/');
+    return ok
+        ? GeneratedImage(url: url, shape: '${json['shape'] ?? 'poster'}')
+        : null;
+  }
+
+  Map<String, dynamic> toJson() => {'url': url, 'shape': shape};
+}
+
+/// The state of a video NEXO AI is making.
+class GeneratedVideo {
+  const GeneratedVideo(
+      {required this.id, this.status = 'queued', this.progress = 0, this.url});
+  final String id;
+
+  /// `queued`, `running`, `done` or `failed`.
+  final String status;
+  final int progress;
+  final String? url;
+
+  bool get finished => status == 'done' || status == 'failed';
+
+  static GeneratedVideo? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final id = '${json['id'] ?? ''}';
+    if (!RegExp(r'^[\w-]{4,100}$').hasMatch(id)) return null;
+    final url = json['url'];
+    return GeneratedVideo(
+        id: id,
+        status: '${json['status'] ?? 'queued'}',
+        progress: (json['progress'] is num)
+            ? (json['progress'] as num).round().clamp(0, 100)
+            : 0,
+        url: url is String && url.startsWith('https://') ? url : null);
+  }
+}
+
+List<T> _list<T>(dynamic value, T? Function(dynamic) parse) =>
+    (value is List ? value : const <dynamic>[])
+        .map(parse)
+        .whereType<T>()
+        .toList();
+
 /// One turn in a NEXO Assistant conversation.
 class AssistantMessage {
   const AssistantMessage(
       {required this.role,
       required this.content,
       this.items = const [],
-      this.remembered = const []});
+      this.remembered = const [],
+      this.images = const [],
+      this.videoIds = const []});
 
   /// `user` or `assistant`.
   final String role;
@@ -38,6 +103,12 @@ class AssistantMessage {
 
   /// Facts the assistant saved to memory while writing this answer.
   final List<String> remembered;
+
+  /// Images the assistant made for this answer.
+  final List<GeneratedImage> images;
+
+  /// Videos the assistant started; the chat checks on them until ready.
+  final List<String> videoIds;
 
   bool get fromUser => role == 'user';
 
@@ -51,6 +122,13 @@ class AssistantMessage {
         if (items.isNotEmpty)
           'items': [for (final item in items) item.toJson()],
         if (remembered.isNotEmpty) 'remembered': remembered,
+        // Inline backup images are large; only linked ones are kept.
+        if (images.any((image) => !image.inline))
+          'images': [
+            for (final image in images)
+              if (!image.inline) image.toJson()
+          ],
+        if (videoIds.isNotEmpty) 'videos': videoIds,
       };
 
   static AssistantMessage? fromStorage(Map<String, dynamic> json) {
@@ -61,7 +139,9 @@ class AssistantMessage {
         role: role as String,
         content: content,
         items: _items(json['items']),
-        remembered: _strings(json['remembered']));
+        remembered: _strings(json['remembered']),
+        images: _list(json['images'], GeneratedImage.fromJson),
+        videoIds: _strings(json['videos']));
   }
 
   /// Parses the API's `{reply, items, remembered}` answer.
@@ -71,6 +151,13 @@ class AssistantMessage {
         content: '${json['reply'] ?? ''}'.trim(),
         items: _items(json['items']),
         remembered: _strings(json['remembered']),
+        images:
+            _list((json['media'] as Map?)?['images'], GeneratedImage.fromJson),
+        videoIds: [
+          for (final video in _list(
+              (json['media'] as Map?)?['videos'], GeneratedVideo.fromJson))
+            video.id
+        ],
       );
 }
 

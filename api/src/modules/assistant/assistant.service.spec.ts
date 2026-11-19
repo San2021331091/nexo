@@ -3,6 +3,7 @@ import { RateLimiter } from './assistant.controller';
 import { TmdbService } from '../tmdb/tmdb.service';
 import { YouTubeFeedService } from '../sports/youtube-feed.service';
 import { YouTubeLibraryService } from '../library/youtube-library.service';
+import { MediaService } from '../media/media.service';
 
 const movie = { id: 'tmdb-movie-550', slug: 'tmdb-550', tmdbId: 550, title: 'Fight Club', name: 'Fight Club', type: 'movie', year: 1999, rating: 8.4, genres: ['Drama'], synopsis: 'An insomniac office worker...', playbackUrl: 'https://embed.example/x' };
 const series = { id: 'tmdb-tv-1', slug: 'tmdb-1', tmdbId: 1, title: 'Crash Landing on You', name: 'Crash Landing on You', type: 'series', year: 2019, genres: ['Drama'], synopsis: 'A paragliding mishap...' };
@@ -33,7 +34,12 @@ describe('RateLimiter', () => {
 
 describe('AssistantService.chat', () => {
   const tmdb = { searchMovies: jest.fn(async () => [movie]), searchSeries: jest.fn(async () => []) } as unknown as TmdbService;
-  const service = new AssistantService(tmdb, {} as YouTubeFeedService, {} as YouTubeLibraryService);
+  const media = {
+    status: jest.fn(() => ({ images: true, videos: true })),
+    image: jest.fn(async () => ({ url: 'https://cdn.example/poster.png', provider: 'agnes', shape: 'poster' })),
+    startVideo: jest.fn(async () => ({ id: 'video_1', status: 'queued', progress: 0, url: null })),
+  };
+  const service = new AssistantService(tmdb, {} as YouTubeFeedService, {} as YouTubeLibraryService, media as unknown as MediaService);
   const reply = (message: object) => new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
   beforeEach(() => { process.env.OPENROUTER_API_KEY = 'test-key'; process.env.TAVILY_API_KEY = 'tvly-test'; });
   afterEach(() => { delete process.env.OPENROUTER_API_KEY; delete process.env.TAVILY_API_KEY; jest.restoreAllMocks(); });
@@ -85,6 +91,30 @@ describe('AssistantService.chat', () => {
     await service.chat([{ role: 'user', content: 'hi' }]);
     const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { tools: { function: { name: string } }[] };
     expect(body.tools.map((tool) => tool.function.name)).not.toContain('web_search');
+  });
+
+  it('creates images and videos and returns them as media, not in the text', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [
+        { id: 'i1', type: 'function', function: { name: 'generate_image', arguments: '{"prompt":"A neon cyberpunk city poster","shape":"poster"}' } },
+        { id: 'v1', type: 'function', function: { name: 'create_video', arguments: '{"prompt":"Rain over a neon city, slow push-in"}' } },
+      ] }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: 'Here is your poster! The clip will appear in a few minutes.' }));
+    const result = await service.chat([{ role: 'user', content: 'make a cyberpunk poster and a short clip' }]);
+    expect(result.media.images).toEqual([expect.objectContaining({ url: 'https://cdn.example/poster.png' })]);
+    expect(result.media.videos).toEqual([expect.objectContaining({ id: 'video_1', status: 'queued' })]);
+    expect(media.image).toHaveBeenCalledWith('A neon cyberpunk city poster', 'poster', expect.any(Number));
+    const second = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)) as { messages: { role: string; content: string }[] };
+    expect(second.messages.filter((message) => message.role === 'tool').map((message) => message.content).join()).not.toContain('cdn.example');
+  });
+
+  it('does not offer media tools that are not configured', async () => {
+    media.status.mockReturnValueOnce({ images: false, videos: false });
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValueOnce(reply({ role: 'assistant', content: 'Hi!' }));
+    await service.chat([{ role: 'user', content: 'hi' }]);
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { tools: { function: { name: string } }[] };
+    expect(body.tools.map((tool) => tool.function.name)).not.toEqual(expect.arrayContaining(['generate_image']));
+    expect(body.tools.map((tool) => tool.function.name)).not.toEqual(expect.arrayContaining(['create_video']));
   });
 
   it('reports a clear error when OpenRouter fails', async () => {

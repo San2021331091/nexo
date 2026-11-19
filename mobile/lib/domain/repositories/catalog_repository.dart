@@ -40,6 +40,9 @@ abstract interface class CatalogRepository {
   /// Asks NEXO Assistant; throws [AssistantException] with a message to show.
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
       {String? region, List<String> memory = const []});
+
+  /// The state of a video NEXO AI is making.
+  Future<GeneratedVideo> generatedVideo(String id);
   Future<List<CatalogItem>> saved();
   Future<void> save(CatalogItem item);
   Future<void> remove(String id);

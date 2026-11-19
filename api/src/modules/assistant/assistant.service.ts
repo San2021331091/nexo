@@ -2,6 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { TmdbService, watchRegion } from '../tmdb/tmdb.service';
 import { YouTubeFeedService } from '../sports/youtube-feed.service';
 import { LibraryGroup, YouTubeLibraryService } from '../library/youtube-library.service';
+import { GeneratedImage, ImageShape, MediaService, VideoJob } from '../media/media.service';
 
 // NEXO's chat assistant. The model (any OpenRouter model, DeepSeek by default)
 // answers from live NEXO data through tools: TMDB for movies, series and dramas,
@@ -27,13 +28,19 @@ const TOOLS = [
   { type: 'function', function: { name: 'free_full_videos', description: 'Newest full episodes or full movies uploaded by official channels on YouTube, playable free in NEXO.', parameters: { type: 'object', properties: { group: { type: 'string', enum: ['movies', 'series', 'dramas'] } }, required: ['group'] } } },
   { type: 'function', function: { name: 'save_memory', description: 'Remember a lasting fact about the viewer for future chats: favourite genres, languages, teams, actors, titles they loved or disliked, or anything they ask you to remember. One short fact per call, written in the third person (e.g. "Loves Korean romance dramas").', parameters: { type: 'object', properties: { fact: { type: 'string' } }, required: ['fact'] } } },
   { type: 'function', function: { name: 'web_search', description: 'Search the web for current facts NEXO tools do not cover: entertainment and sports news, release dates, box office, awards, cast announcements, match results, standings, schedules. Returns a short answer and sources with snippets.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'A focused search query, including the year when it matters.' }, news: { type: 'boolean', description: 'true for recent news and results from the last two weeks.' } }, required: ['query'] } } },
+  { type: 'function', function: { name: 'generate_image', description: 'Create an original image from a description: posters, thumbnails, wallpapers, fan art, cover art, scene concepts. The image is shown to the viewer in the chat. Write a rich English prompt (subject, setting, style, lighting, mood).', parameters: { type: 'object', properties: { prompt: { type: 'string' }, shape: { type: 'string', enum: ['poster', 'wide', 'square'], description: 'poster = vertical 2:3, wide = 16:9 thumbnail or wallpaper, square = 1:1' } }, required: ['prompt'] } } },
+  { type: 'function', function: { name: 'create_video', description: 'Start an original short video clip (a few seconds) from a description: intros, teasers, mood clips, animated scenes. It takes a few minutes; the clip appears in the chat when ready. Write a rich English prompt with camera movement, subject, setting and mood.', parameters: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] } } },
   { type: 'function', function: { name: 'sports_now', description: 'Sports broadcasts live right now on official channels, plus the latest official sports videos and highlights.', parameters: { type: 'object', properties: {} } } },
 ];
 
 /** Web search uses Tavily: on when TAVILY_API_KEY is set, unless ASSISTANT_WEB_SEARCH=off. */
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const webSearchEnabled = () => Boolean(process.env.TAVILY_API_KEY?.trim()) && !['off', 'disabled', 'false', 'none'].includes((process.env.ASSISTANT_WEB_SEARCH ?? '').trim().toLowerCase());
-const toolsFor = () => (webSearchEnabled() ? TOOLS : TOOLS.filter((tool) => tool.function.name !== 'web_search'));
+/** The tools on offer, leaving out the ones whose service is not configured. */
+const toolsFor = (off: string[] = []) => TOOLS.filter((tool) => !off.includes(tool.function.name) && (tool.function.name !== 'web_search' || webSearchEnabled()));
+
+/** Images and videos the assistant made while answering. */
+export interface ChatMedia { images: GeneratedImage[]; videos: VideoJob[] }
 
 const text = (value: unknown, max = 300) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
@@ -56,7 +63,13 @@ export function pickCards(reply: string, items: Item[]): Item[] {
 @Injectable()
 export class AssistantService {
   private readonly logger = new Logger(AssistantService.name);
-  constructor(private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly library: YouTubeLibraryService) {}
+  constructor(private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly library: YouTubeLibraryService, private readonly media: MediaService) {}
+
+  /** Tools whose service is not configured, so the model is not offered them. */
+  private get offTools() {
+    const media = this.media.status();
+    return [...(media.images ? [] : ['generate_image']), ...(media.videos ? [] : ['create_video'])];
+  }
 
   get configured() { return Boolean(process.env.OPENROUTER_API_KEY?.trim()); }
   /** What is switched on, without any secrets; for checking a deployment. */
@@ -81,6 +94,8 @@ export class AssistantService {
       '- Keep it scannable: no walls of text, no tables, only a few emojis.',
       '- End with one short follow-up question or suggestion in *italics*.',
       'Mention titles by their exact name so the app can show them as cards.',
+      'When the viewer asks you to create, make, design or draw an image, poster, thumbnail, wallpaper or artwork, call generate_image; for a video, clip, intro or animation, call create_video. Do not paste image or video links; the app shows them. After create_video, say the clip takes a few minutes and will appear here.',
+      'Generated images and videos must be original and family friendly: no sexual content, no gore, no real people\'s faces or likeness, and no copies of official posters, logos or copyrighted characters. Offer an original take instead (e.g. "a poster inspired by a space adventure", not the official Interstellar poster).',
       ...remembered,
     ].join('\n');
   }
@@ -91,7 +106,7 @@ export class AssistantService {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY?.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'NEXO' },
-      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: toolsFor(), tool_choice: 'auto' } : {}) }),
+      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: toolsFor(this.offTools), tool_choice: 'auto' } : {}) }),
       signal: AbortSignal.timeout(remaining),
     });
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
@@ -121,7 +136,7 @@ export class AssistantService {
     return { answer: text(body.answer, 1200) || undefined, sources: [...new Map(sources.map((source) => [source.url, source])).values()].slice(0, 5) };
   }
 
-  private async runTool(name: string, rawArgs: string, region: string, remembered: string[], deadline: number): Promise<Item[] | Item> {
+  private async runTool(name: string, rawArgs: string, region: string, remembered: string[], deadline: number, media: ChatMedia): Promise<Item[] | Item> {
     let args: Record<string, unknown> = {};
     try { args = JSON.parse(rawArgs || '{}') as Record<string, unknown>; } catch { return { error: 'Arguments were not valid JSON.' }; }
     const kindOf = (value: unknown, allowed: string[], fallback: string) => (typeof value === 'string' && allowed.includes(value) ? value : fallback);
@@ -156,6 +171,20 @@ export class AssistantService {
         if (!webSearchEnabled()) return { error: 'Web search is turned off.' };
         return this.webSearch(query, args.news === true, deadline);
       }
+      case 'generate_image': {
+        if (media.images.length >= 2) return { error: 'Two images per answer at most.' };
+        const shape = kindOf(args.shape, ['poster', 'wide', 'square'], 'poster') as ImageShape;
+        // Leave a few seconds for the reply after the image is made.
+        const image = await this.media.image(args.prompt, shape, Math.max(5_000, deadline - Date.now() - 5_000));
+        media.images.push(image);
+        return { created: true, shape, note: 'The image is shown to the viewer below your reply.' };
+      }
+      case 'create_video': {
+        if (media.videos.length >= 1) return { error: 'One video per answer at most.' };
+        const job = await this.media.startVideo(args.prompt);
+        media.videos.push(job);
+        return { started: true, note: 'The clip takes a few minutes and appears in the chat when ready.' };
+      }
       case 'save_memory': {
         const fact = text(args.fact, 200).replace(/\s+/g, ' ');
         if (fact.length < 3) return { error: 'fact is required' };
@@ -172,7 +201,7 @@ export class AssistantService {
   }
 
   /** One assistant reply to the conversation, with the titles it mentions as playable cards. */
-  async chat(history: ChatTurn[], regionCode?: string, memory: string[] = []): Promise<{ reply: string; items: Item[]; remembered: string[] }> {
+  async chat(history: ChatTurn[], regionCode?: string, memory: string[] = []): Promise<{ reply: string; items: Item[]; remembered: string[]; media: ChatMedia }> {
     if (!this.configured) throw new ServiceUnavailableException('The assistant is not configured.');
     const region = watchRegion(regionCode);
     const deadline = Date.now() + BUDGET_MS;
@@ -180,16 +209,17 @@ export class AssistantService {
     const remembered: string[] = [];
     const messages: Message[] = [{ role: 'system', content: this.systemPrompt(region, facts) }, ...history.slice(-12).map((turn) => ({ role: turn.role, content: turn.content.slice(0, 2000) }))];
     const found: Item[] = [];
+    const media: ChatMedia = { images: [], videos: [] };
     try {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const message = await this.complete(messages, round < MAX_TOOL_ROUNDS, deadline);
         const calls = (message.tool_calls ?? []).filter((call) => call?.function?.name).slice(0, 4);
         if (!calls.length) {
           const reply = text(message.content, 4000) || "Sorry, I couldn't find an answer to that.";
-          return { reply, items: pickCards(reply, found), remembered };
+          return { reply, items: pickCards(reply, found), remembered, media };
         }
         messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
-        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered, deadline).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
+        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered, deadline, media).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
         calls.forEach((call, index) => {
           const result = results[index];
           if (Array.isArray(result)) found.push(...result.filter((item) => item.id));
@@ -197,7 +227,7 @@ export class AssistantService {
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(forModel).slice(0, 6000) });
         });
       }
-      return { reply: "Sorry, that took too many steps. Try asking in a simpler way.", items: pickCards('', found), remembered };
+      return { reply: "Sorry, that took too many steps. Try asking in a simpler way.", items: pickCards('', found), remembered, media };
     } catch (error) {
       this.logger.warn(`Assistant failed: ${error instanceof Error ? error.message : 'error'}`);
       throw new ServiceUnavailableException('The assistant is busy right now. Please try again.');

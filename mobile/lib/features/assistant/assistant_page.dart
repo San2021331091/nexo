@@ -8,6 +8,7 @@ import '../../domain/entities/assistant.dart';
 import '../../domain/entities/catalog_item.dart';
 import '../catalog/catalog_cubit.dart';
 import '../shared/widgets.dart';
+import 'generated_media.dart';
 import 'markdown_text.dart';
 
 const _suggestions = [
@@ -23,6 +24,14 @@ const _suggestions = [
   ),
   (icon: Icons.tv, text: 'Best web series of 2026 so far?'),
   (icon: Icons.movie_filter_outlined, text: 'A feel-good movie for tonight'),
+  (
+    icon: Icons.palette_outlined,
+    text: 'Design a poster for a rainy-night Bangla thriller'
+  ),
+  (
+    icon: Icons.videocam_outlined,
+    text: 'Make a short cinematic cricket stadium intro clip'
+  ),
 ];
 
 /// NEXO Assistant: a chat that answers from live NEXO data, keeps past chats
@@ -332,6 +341,14 @@ class _AssistantBubble extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(child: MarkdownText(message.content)),
           ]),
+          if (message.images.isNotEmpty)
+            Padding(
+                padding: const EdgeInsets.only(left: 38, top: 14),
+                child: GeneratedImages(images: message.images)),
+          for (final id in message.videoIds)
+            Padding(
+                padding: const EdgeInsets.only(left: 38, top: 14),
+                child: GeneratedVideoCard(id: id)),
           if (message.items.isNotEmpty) ...[
             const SizedBox(height: 14),
             _ResultCards(items: message.items),
