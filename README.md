@@ -115,4 +115,4 @@ Vercel setup:
 
 The API can still run on its own (`npm run start -w @nexo/api`) on any Node host; set the admin's `API_BASE_URL` to its HTTPS URL in that case. Supply operator owned imagery and rights cleared playback sources before publishing catalog entries.
 
-[Live Link](https://drive.google.com/file/d/15J5GvjJ4ybmffYma1WsHI8WFQfHGhVIe/view?usp=sharing)
+[Live Link](https://drive.google.com/file/d/1IDh0kiEGbFEvJtIWJLpcg0vTD2YXUxYO/view?usp=sharing)
