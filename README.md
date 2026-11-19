@@ -27,8 +27,8 @@ NEXO is a guest first discovery and playback app for live TV, movies, and web se
   </tr>
   <tr>
     <td align="center"><img src="screenshots/Screenshot%202026-11-17%20193409.png" width="240" alt="Columbo series details with Watch S1 E1"><br><sub>Series details</sub></td>
-    <td></td>
-    <td></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-19%20183059.png" width="240" alt="NEXO splash screen with play logo and the tagline Your next favorite starts here"><br><sub>Splash screen</sub></td>
+    <td align="center"><img src="screenshots/Screenshot%202026-11-19%20183202.png" width="240" alt="NEXO AI chat with suggested questions about movies, dramas and sports"><br><sub>NEXO AI assistant</sub></td>
   </tr>
 </table>
 
