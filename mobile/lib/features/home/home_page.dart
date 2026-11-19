@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../domain/entities/catalog_item.dart';
 import '../catalog/catalog_cubit.dart';
+import '../search/section_search_page.dart';
 import '../shared/widgets.dart';
 
 const _tabs = [
@@ -110,38 +111,53 @@ class _Header extends StatelessWidget {
             ),
             SizedBox(
               height: _tabRowHeight,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                itemCount: _tabs.length,
-                itemBuilder: (context, index) {
-                  final active = index == selected;
-                  return InkWell(
-                    onTap: () => onSelect(index),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(_tabs[index].label,
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    color: active
-                                        ? Colors.white
-                                        : Colors.white.withValues(alpha: .78))),
-                            const SizedBox(height: 6),
-                            Container(
-                                height: 2,
-                                width: 34,
-                                color:
-                                    active ? Colors.white : Colors.transparent),
-                          ]),
-                    ),
-                  );
-                },
-              ),
+              child: Row(children: [
+                Expanded(
+                    child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  itemCount: _tabs.length,
+                  itemBuilder: (context, index) {
+                    final active = index == selected;
+                    return InkWell(
+                      onTap: () => onSelect(index),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(_tabs[index].label,
+                                  style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                      color: active
+                                          ? Colors.white
+                                          : Colors.white
+                                              .withValues(alpha: .78))),
+                              const SizedBox(height: 6),
+                              Container(
+                                  height: 2,
+                                  width: 34,
+                                  color: active
+                                      ? Colors.white
+                                      : Colors.transparent),
+                            ]),
+                      ),
+                    );
+                  },
+                )),
+                // Searches only the open tab: Sports finds sports, Dramas dramas.
+                IconButton(
+                    tooltip: 'Search ${_tabs[selected].label}',
+                    onPressed: () =>
+                        context.push(Uri(path: '/search', queryParameters: {
+                          if (sectionForTab[_tabs[selected].id] != null)
+                            'section': sectionForTab[_tabs[selected].id]!
+                        }).toString()),
+                    icon: const Icon(Icons.search, size: 26)),
+                const SizedBox(width: 6),
+              ]),
             ),
           ]),
         ),

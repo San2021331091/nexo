@@ -13,6 +13,7 @@ import 'features/browse/browse_page.dart';
 import 'features/catalog/catalog_cubit.dart';
 import 'features/catalog/content_details_page.dart';
 import 'features/player/player_page.dart';
+import 'features/search/section_search_page.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shorts/shorts_page.dart';
 
@@ -69,6 +70,10 @@ class _NexoAppState extends State<NexoApp> {
                 _parsePlaybackServers(state.uri.queryParameters['servers']),
             trailerUrl: state.uri.queryParameters['trailer'],
             startFullscreen: state.uri.queryParameters['fullscreen'] == '1')),
+    GoRoute(
+        path: '/search',
+        builder: (context, state) =>
+            SectionSearchPage(section: state.uri.queryParameters['section'])),
     GoRoute(
         path: '/shorts',
         builder: (context, state) {

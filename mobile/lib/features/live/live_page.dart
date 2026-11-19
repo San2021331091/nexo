@@ -15,21 +15,56 @@ class LivePage extends StatefulWidget {
 
 class _LivePageState extends State<LivePage> {
   String _category = '';
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<CatalogCubit>().state;
-    final channels = _category.isEmpty
-        ? state.channels
-        : state.channels
-            .where((channel) => channel.category == _category)
-            .toList();
+    final query = _search.text.trim();
+    final channels =
+        filterChannels(state.channels, category: _category, query: query);
     return DecoratedBox(
       decoration: const BoxDecoration(gradient: kPageGradient),
       child: SafeArea(
         bottom: false,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const PageTitle('Live TV'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(fontSize: 16),
+              decoration: InputDecoration(
+                hintText: 'Search channels',
+                hintStyle: const TextStyle(color: kMuted),
+                prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                suffixIcon: query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () => setState(_search.clear),
+                        icon: const Icon(Icons.close)),
+                filled: true,
+                fillColor: const Color(0x33000000),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    borderSide: const BorderSide(color: Color(0x44FFFFFF))),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    borderSide: const BorderSide(color: kPink)),
+              ),
+            ),
+          ),
           if (state.categories.isNotEmpty)
             FilterChips(
                 labels: ['All', ...state.categories],
@@ -48,11 +83,16 @@ class _LivePageState extends State<LivePage> {
                               retry: () =>
                                   context.read<CatalogCubit>().refresh()))
                       : channels.isEmpty
-                          ? const EmptyState(
-                              icon: Icons.live_tv,
-                              title: 'No channels available',
-                              body:
-                                  'Live channels will appear here when they are added.')
+                          ? EmptyState(
+                              icon: query.isEmpty
+                                  ? Icons.live_tv
+                                  : Icons.search_off,
+                              title: query.isEmpty
+                                  ? 'No channels available'
+                                  : 'No channels match "$query"',
+                              body: query.isEmpty
+                                  ? 'Live channels will appear here when they are added.'
+                                  : 'Try another name, or pick All above.')
                           : RefreshIndicator(
                               color: kPink,
                               onRefresh: () =>
@@ -62,6 +102,24 @@ class _LivePageState extends State<LivePage> {
       ),
     );
   }
+}
+
+/// Channels in [category] (all when empty) whose name, category or
+/// description contains every word of [query]. Exported for tests.
+List<CatalogItem> filterChannels(List<CatalogItem> channels,
+    {String category = '', String query = ''}) {
+  final words = query
+      .toLowerCase()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .toList();
+  return channels.where((channel) {
+    if (category.isNotEmpty && channel.category != category) return false;
+    if (words.isEmpty) return true;
+    final haystack =
+        '${channel.name} ${channel.category} ${channel.synopsis}'.toLowerCase();
+    return words.every(haystack.contains);
+  }).toList();
 }
 
 class PageTitle extends StatelessWidget {
