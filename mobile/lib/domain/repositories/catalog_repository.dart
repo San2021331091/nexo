@@ -36,6 +36,7 @@ abstract interface class CatalogRepository {
       {required String type, required int tmdbId, int? season, int? episode});
   Future<FreeWatchOptions> freeWatchOptions(
       {required String type, required String slug, String? region});
+
   /// Asks NEXO Assistant; throws [AssistantException] with a message to show.
   Future<AssistantMessage> askAssistant(List<AssistantMessage> history,
       {String? region, List<String> memory = const []});

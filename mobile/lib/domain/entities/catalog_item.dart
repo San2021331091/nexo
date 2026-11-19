@@ -18,6 +18,7 @@ class CatalogItem {
     this.rating,
     this.genres = const [],
     this.language = '',
+    this.section,
   });
 
   final String id;
@@ -43,6 +44,10 @@ class CatalogItem {
   final List<String> genres;
   final String language;
 
+  /// The Discover group the API filed this under (`sports`, `movies`,
+  /// `series`, `dramas`), when the type alone does not say.
+  final String? section;
+
   bool get isPlayable => playbackUrl != null && playbackUrl!.isNotEmpty;
 
   /// The best landscape-friendly artwork for list rows and video cards.
@@ -63,7 +68,8 @@ class CatalogItem {
             '${json['playbackKind'] ?? json['playback_kind'] ?? 'unavailable'}',
         playbackServers: (json['playbackServers'] as List? ?? const <dynamic>[])
             .whereType<Map<dynamic, dynamic>>()
-            .map((item) => PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
+            .map((item) =>
+                PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
             .whereType<PlaybackServer>()
             .toList(),
         trailerUrl: _string(json['trailerUrl']),
@@ -77,6 +83,7 @@ class CatalogItem {
             .map((value) => '$value')
             .toList(),
         language: '${json['language'] ?? ''}',
+        section: _string(json['section']),
       );
 
   Map<String, dynamic> toJson() => {
@@ -90,7 +97,11 @@ class CatalogItem {
         'playbackUrl': playbackUrl,
         'playbackKind': playbackKind,
         'playbackServers': playbackServers
-            .map((server) => {'label': server.label, 'provider': server.provider, 'url': server.url})
+            .map((server) => {
+                  'label': server.label,
+                  'provider': server.provider,
+                  'url': server.url
+                })
             .toList(),
         'trailerUrl': trailerUrl,
         'type': type,
@@ -100,6 +111,7 @@ class CatalogItem {
         'rating': rating,
         'genres': genres,
         'language': language,
+        if (section != null) 'section': section,
       };
 
   static String? _string(dynamic value) =>
@@ -189,13 +201,15 @@ class PlaybackServer {
 }
 
 class FreeWatchProvider {
-  const FreeWatchProvider({required this.id, required this.name, this.logoUrl, required this.kind});
+  const FreeWatchProvider(
+      {required this.id, required this.name, this.logoUrl, required this.kind});
   final int id;
   final String name;
   final String? logoUrl;
   final String kind;
 
-  factory FreeWatchProvider.fromJson(Map<String, dynamic> json) => FreeWatchProvider(
+  factory FreeWatchProvider.fromJson(Map<String, dynamic> json) =>
+      FreeWatchProvider(
         id: int.tryParse('${json['id'] ?? ''}') ?? 0,
         name: '${json['name'] ?? ''}',
         logoUrl: CatalogItem._string(json['logoUrl']),
@@ -204,17 +218,20 @@ class FreeWatchProvider {
 }
 
 class FreeWatchOptions {
-  const FreeWatchOptions({required this.region, this.link, this.providers = const []});
+  const FreeWatchOptions(
+      {required this.region, this.link, this.providers = const []});
   final String region;
   final String? link;
   final List<FreeWatchProvider> providers;
 
-  factory FreeWatchOptions.fromJson(Map<String, dynamic> json) => FreeWatchOptions(
+  factory FreeWatchOptions.fromJson(Map<String, dynamic> json) =>
+      FreeWatchOptions(
         region: '${json['region'] ?? ''}',
         link: CatalogItem._string(json['link']),
         providers: (json['providers'] as List? ?? const <dynamic>[])
             .whereType<Map<dynamic, dynamic>>()
-            .map((item) => FreeWatchProvider.fromJson(Map<String, dynamic>.from(item)))
+            .map((item) =>
+                FreeWatchProvider.fromJson(Map<String, dynamic>.from(item)))
             .where((provider) => provider.id > 0 && provider.name.isNotEmpty)
             .toList(),
       );

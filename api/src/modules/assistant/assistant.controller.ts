@@ -1,4 +1,4 @@
-import { Body, Controller, HttpException, HttpStatus, Ip, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Ip, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateNested } from 'class-validator';
@@ -34,6 +34,8 @@ export class RateLimiter {
 export class AssistantController {
   private readonly limiter = new RateLimiter();
   constructor(private readonly assistant: AssistantService) {}
+
+  @Get('status') status() { return { data: this.assistant.status() }; }
 
   @Post('chat') async chat(@Body() body: ChatBody, @Ip() ip: string) {
     if (body.messages[body.messages.length - 1].role !== 'user') throw new HttpException('The last message must be from the user.', HttpStatus.BAD_REQUEST);

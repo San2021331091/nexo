@@ -161,6 +161,23 @@ export class YouTubeLibraryService implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
+  /** Stored full episodes and movies whose title or channel has every word of the query, tagged with their group. */
+  async search(query: string, limit = 20): Promise<(LibraryVideo & { section: LibraryGroup })[]> {
+    const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 1).slice(0, 6);
+    if (!words.length || !(await this.ensureTable())) return [];
+    const params: unknown[] = [];
+    const where = words.map((word) => { params.push(`%${word.replace(/[%_\\]/g, (char) => `\\${char}`)}%`); return `(title ILIKE $${params.length} OR channel_title ILIKE $${params.length})`; });
+    params.push(Math.min(Math.max(limit, 1), 50));
+    try {
+      const result = await this.db.query<Row & { grp: LibraryGroup }>(`SELECT video_id, grp, channel_title, title, published_at FROM youtube_library WHERE ${where.join(' AND ')} ORDER BY published_at DESC LIMIT $${params.length}`, params);
+      const seen = new Set<string>();
+      return result.rows.filter((row) => !seen.has(row.video_id) && Boolean(seen.add(row.video_id))).map((row) => ({ ...libraryVideo(row), section: row.grp }));
+    } catch (error) {
+      this.logger.warn(`YouTube library search failed: ${error instanceof Error ? error.message : 'error'}`);
+      return [];
+    }
+  }
+
   /** The newest full episodes or movies stored for a group. Empty when the table is unavailable. */
   async latest(group: LibraryGroup, limit = 30): Promise<LibraryVideo[]> {
     const cacheKey = `${group}:${limit}`;

@@ -33,4 +33,12 @@ describe('ChannelRepository existing Neon schema mapping', () => {
     const repository = new ChannelRepository({ query } as unknown as PostgresService);
     await expect(repository.list()).resolves.toEqual([expect.objectContaining({ playbackUrl: null, playbackKind: 'unavailable' })]);
   });
+
+  it('searches channel names, descriptions and category names', async () => {
+    const repository = new ChannelRepository({ query } as unknown as PostgresService);
+    await repository.list(48, 'news');
+    const call = query.mock.calls.find(([sql]) => sql.includes('FROM "channeltb"'))!;
+    expect(call[0]).toContain(`"cname" ILIKE $1 OR COALESCE("description"::text, '') ILIKE $1 OR "category"::text = ANY($2)`);
+    expect(call[1]).toEqual(expect.arrayContaining(['%news%', ['cat-1', 'News']]));
+  });
 });

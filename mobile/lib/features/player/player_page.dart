@@ -37,7 +37,11 @@ String? youtubeVideoId(Uri uri) {
 
 /// Hosts that servers other than Server 1 may load. Server 1 is the app's
 /// existing source and is checked like any playback URL.
-const _extraServerHosts = {'archive.org', 'api.esportex.site', ..._youtubeHosts};
+const _extraServerHosts = {
+  'archive.org',
+  'api.esportex.site',
+  ..._youtubeHosts
+};
 
 /// Whether a playback server's URL may be opened: HTTPS, no credentials, and
 /// for added servers an allowlisted host.

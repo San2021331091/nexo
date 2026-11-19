@@ -65,7 +65,8 @@ class _NexoAppState extends State<NexoApp> {
             type: state.uri.queryParameters['type'] ?? 'channel',
             playbackKind: state.uri.queryParameters['playbackKind'] ?? 'hls',
             category: state.uri.queryParameters['category'] ?? '',
-            playbackServers: _parsePlaybackServers(state.uri.queryParameters['servers']),
+            playbackServers:
+                _parsePlaybackServers(state.uri.queryParameters['servers']),
             trailerUrl: state.uri.queryParameters['trailer'],
             startFullscreen: state.uri.queryParameters['fullscreen'] == '1')),
     GoRoute(
@@ -92,7 +93,8 @@ class _NexoAppState extends State<NexoApp> {
       if (values is! List) return const [];
       return values
           .whereType<Map<dynamic, dynamic>>()
-          .map((item) => PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
+          .map((item) =>
+              PlaybackServer.fromJson(Map<String, dynamic>.from(item)))
           .whereType<PlaybackServer>()
           .toList();
     } catch (_) {

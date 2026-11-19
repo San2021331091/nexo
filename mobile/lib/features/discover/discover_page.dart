@@ -23,6 +23,89 @@ const _genres = [
   'Documentary',
 ];
 
+/// The Discover groups, in the order they are shown.
+const discoverSections = [
+  'Live Channels',
+  'Sports',
+  'Movies',
+  'Web Series',
+  'Dramas',
+];
+
+// Original languages whose TV series NEXO files under Dramas (K-dramas,
+// Turkish, Chinese, Japanese, Thai, South Asian and Arabic serials). Local
+// catalogue entries may store the language name instead of the code.
+const _dramaLanguages = {
+  'ko',
+  'ja',
+  'zh',
+  'cn',
+  'th',
+  'tr',
+  'hi',
+  'ur',
+  'bn',
+  'ta',
+  'te',
+  'ml',
+  'mr',
+  'pa',
+  'ar',
+  'fa',
+  'tl',
+  'id',
+  'ms',
+  'vi',
+  'korean',
+  'japanese',
+  'chinese',
+  'mandarin',
+  'cantonese',
+  'thai',
+  'turkish',
+  'hindi',
+  'urdu',
+  'bangla',
+  'bengali',
+  'tamil',
+  'telugu',
+  'malayalam',
+  'arabic',
+  'filipino',
+  'indonesian',
+};
+
+/// Which Discover group an item belongs to. Exported for tests.
+String discoverSection(CatalogItem item) {
+  switch (item.section) {
+    case 'sports':
+      return 'Sports';
+    case 'movies':
+      return 'Movies';
+    case 'series':
+      return 'Web Series';
+    case 'dramas':
+      return 'Dramas';
+  }
+  switch (item.type) {
+    case 'channel':
+      return item.category.toLowerCase().contains('sport')
+          ? 'Sports'
+          : 'Live Channels';
+    case 'video':
+    case 'short':
+      // Untagged videos come from the official sports channels.
+      return 'Sports';
+    case 'movie':
+      return 'Movies';
+    default:
+      final language = item.language.trim().toLowerCase();
+      final drama = _dramaLanguages.contains(language) ||
+          item.genres.any((genre) => genre.toLowerCase() == 'soap');
+      return drama ? 'Dramas' : 'Web Series';
+  }
+}
+
 /// Search across channels, movies and series, plus genre shortcuts.
 class DiscoverPage extends StatefulWidget {
   const DiscoverPage({super.key});
@@ -33,6 +116,7 @@ class DiscoverPage extends StatefulWidget {
 class _DiscoverPageState extends State<DiscoverPage> {
   final _controller = TextEditingController();
   Timer? _debounce;
+  String _section = 'All';
 
   @override
   void initState() {
@@ -65,6 +149,16 @@ class _DiscoverPageState extends State<DiscoverPage> {
     final searching = _controller.text.trim().isNotEmpty;
     final List<CatalogItem> rows =
         searching ? state.searchResults : state.trending;
+    final groups = {
+      for (final section in discoverSections)
+        section: [
+          for (final item in rows)
+            if (discoverSection(item) == section) item
+        ]
+    }..removeWhere((_, items) => items.isEmpty);
+    // A category with no results falls back to everything.
+    final section = groups.containsKey(_section) ? _section : 'All';
+    String chip(String name) => '$name ${groups[name]!.length}';
     return DecoratedBox(
       decoration: const BoxDecoration(gradient: kPageGradient),
       child: SafeArea(
@@ -101,11 +195,19 @@ class _DiscoverPageState extends State<DiscoverPage> {
             ),
           ),
           const SizedBox(height: 14),
-          FilterChips(
-              labels: _genres,
-              onSelected: (genre) => context.push('/browse',
-                  extra: BrowseTarget(
-                      kind: 'movies', title: genre, genre: genre))),
+          if (searching && groups.length > 1)
+            FilterChips(
+                labels: ['All', for (final name in groups.keys) chip(name)],
+                selected: section == 'All' ? 'All' : chip(section),
+                onSelected: (label) => setState(() => _section = groups.keys
+                    .firstWhere((name) => chip(name) == label,
+                        orElse: () => 'All')))
+          else
+            FilterChips(
+                labels: _genres,
+                onSelected: (genre) => context.push('/browse',
+                    extra: BrowseTarget(
+                        kind: 'movies', title: genre, genre: genre))),
           const SizedBox(height: 14),
           const Divider(height: 1, color: Color(0x1FFFFFFF)),
           Expanded(
@@ -117,26 +219,63 @@ class _DiscoverPageState extends State<DiscoverPage> {
                           title: searching ? 'No matches' : 'Find something',
                           body: searching
                               ? 'Try a different title or channel name.'
-                              : 'Search live channels, movies and series.')
-                      : ListView.builder(
+                              : 'Search live channels, sports, movies, web series and dramas.')
+                      : ListView(
                           padding: const EdgeInsets.only(top: 8, bottom: 24),
                           keyboardDismissBehavior:
                               ScrollViewKeyboardDismissBehavior.onDrag,
-                          itemCount: rows.length + 1,
-                          itemBuilder: (context, index) => index == 0
-                              ? Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(20, 14, 20, 8),
-                                  child: Text(
-                                      searching
-                                          ? 'Results'
-                                          : 'Trending Series & Movies',
-                                      style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w700)))
-                              : MediaRow(item: rows[index - 1]))),
+                          children: [
+                              for (final entry in groups.entries)
+                                if (section == 'All' ||
+                                    entry.key == section) ...[
+                                  _GroupHeader(
+                                      title: searching
+                                          ? entry.key
+                                          : 'Trending ${entry.key}',
+                                      count: entry.value.length,
+                                      onSeeAll: section == 'All' &&
+                                              searching &&
+                                              entry.value.length > _preview
+                                          ? () => setState(
+                                              () => _section = entry.key)
+                                          : null),
+                                  for (final item
+                                      in section == 'All' && searching
+                                          ? entry.value.take(_preview)
+                                          : entry.value)
+                                    MediaRow(item: item),
+                                ],
+                            ])),
         ]),
       ),
     );
   }
+}
+
+/// Rows shown per group under "All"; "See all" opens the whole group.
+const _preview = 5;
+
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({required this.title, required this.count, this.onSeeAll});
+  final String title;
+  final int count;
+  final VoidCallback? onSeeAll;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 8, 6),
+        child: Row(children: [
+          Expanded(
+              child: Text.rich(TextSpan(children: [
+            TextSpan(
+                text: title,
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            TextSpan(
+                text: '  $count',
+                style: const TextStyle(fontSize: 15, color: kMuted)),
+          ]))),
+          if (onSeeAll != null)
+            TextButton(onPressed: onSeeAll, child: const Text('See all')),
+        ]),
+      );
 }

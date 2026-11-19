@@ -11,6 +11,8 @@ import { YouTubeLibraryService } from './library/youtube-library.service';
 import { EmbedSportexService, SportexEvent } from './sports/embed-sportex.service';
 
 type Item = Record<string, unknown>;
+/** Words that mean the viewer is looking for sport. */
+const SPORT_WORDS = /\b(sports?|football|soccer|cricket|basketball|nba|tennis|hockey|baseball|rugby|golf|boxing|ufc|mma|wwe|wrestling|f1|formula|motogp|racing|volleyball|badminton|kabaddi|olympics?|fifa|uefa|ipl|bpl|psl|premier league|la ?liga|champions league|world cup|t20|odi)\b/i;
 export type HomeTab = 'all' | 'live' | 'sports' | 'movies' | 'series' | 'dramas';
 export interface BrowseTarget { kind: 'channels' | 'movies' | 'series'; category?: string; genre?: string; language?: string; list?: TmdbList }
 export interface HomeSection { id: string; title: string; style: 'circles' | 'posters' | 'landscape' | 'ranked' | 'shorts'; items: Item[]; viewAll?: BrowseTarget }
@@ -194,6 +196,18 @@ export class CatalogService {
     });
   }
 
+  /** Live broadcasts and videos from the official sports channels whose title or channel has every word of the query. */
+  private async sportsVideoMatches(query: string, limit = 15): Promise<Item[]> {
+    const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 1);
+    if (!words.length) return [];
+    const [live, feeds] = await Promise.all([this.safe(this.sports.liveNow(), []), this.sports.feeds()]);
+    // A sport word ("cricket", "live sports") also brings the channels' live broadcasts.
+    const sporty = SPORT_WORDS.test(query);
+    const videos = [...live.filter(() => sporty), ...feeds.flatMap((feed) => feed.items)];
+    return videos.filter((video) => { const haystack = `${video.name} ${video.category}`.toLowerCase(); return words.every((word) => haystack.includes(word)); })
+      .slice(0, limit).map((video) => ({ ...video, section: 'sports' })) as unknown as Item[];
+  }
+
   async search(q: string, filters: { genre?: string; language?: string; year?: number; category?: string } = {}) {
     const query = q.trim();
     if (!query) return { data: [], meta: { query: q, count: 0 } };
@@ -203,8 +217,15 @@ export class CatalogService {
       this.safe(this.content.seriesList({ limit: 50, q: query, genre: filters.genre, language: filters.language, year: filters.year }).then((result) => result.data as Item[]), []),
       this.tmdb.searchMovies(query), this.tmdb.searchSeries(query),
     ]);
-    const playableSeries = await this.availability.keepPlayable(tmdbSeries);
-    const data = [...channels, ...movies, ...series, ...tmdbMovies.slice(0, 15), ...playableSeries.slice(0, 15)];
+    const [playableSeries, sportsVideos, library, sportsChannels] = await Promise.all([
+      this.availability.keepPlayable(tmdbSeries),
+      this.safe(this.sportsVideoMatches(query), []),
+      this.safe(this.library.search(query), []),
+      // "cricket", "football": the Sports channels, which their names may not say.
+      SPORT_WORDS.test(query) && !filters.category ? this.safe(this.channels.list(30, '', 'Sports').then((items) => this.health.applyFresh(items)), []) : Promise.resolve([]),
+    ]);
+    const channelIds = new Set(channels.map((channel) => channel.id));
+    const data = [...channels, ...sportsChannels.filter((channel) => !channelIds.has(channel.id)), ...movies, ...series, ...tmdbMovies.slice(0, 15), ...playableSeries.slice(0, 15), ...library, ...sportsVideos];
     return { data, meta: { query: q, count: data.length } };
   }
 

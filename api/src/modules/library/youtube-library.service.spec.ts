@@ -86,4 +86,16 @@ describe('YouTubeLibraryService.sync', () => {
     const db = { query: jest.fn(async () => ({ rows: [], rowCount: 0 })) } as unknown as PostgresService;
     expect(await new YouTubeLibraryService(db).sync()).toMatchObject({ channels: 1, added: 0, failed: 1 });
   });
+
+  it('searches stored titles and channels word by word, tagged with the group', async () => {
+    const queries: { sql: string; values: unknown[] }[] = [];
+    const db = { query: jest.fn(async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return sql.startsWith('SELECT video_id, grp') ? { rows: [{ video_id: 'aaaaaaaaaaa', grp: 'dramas', channel_title: 'HUM TV', title: 'Gulbahar Episode 19', published_at: '2026-11-17T10:00:00Z' }, { video_id: 'aaaaaaaaaaa', grp: 'series', channel_title: 'HUM TV', title: 'Gulbahar Episode 19', published_at: '2026-11-17T10:00:00Z' }] } : { rows: [] };
+    }) } as unknown as PostgresService;
+    const results = await new YouTubeLibraryService(db).search('gulbahar 100%');
+    expect(results).toEqual([expect.objectContaining({ id: 'yt-aaaaaaaaaaa', section: 'dramas', playbackKind: 'youtube' })]);
+    const search = queries.find((query) => query.sql.startsWith('SELECT video_id, grp'))!;
+    expect(search.values).toEqual(['%gulbahar%', String.raw`%100\%%`, 20]);
+  });
 });

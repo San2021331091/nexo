@@ -26,8 +26,14 @@ const TOOLS = [
   { type: 'function', function: { name: 'title_details', description: 'Details for one title by TMDB id: overview, year, rating, genres, runtime, trailer, and which free services stream it in the viewer\'s country.', parameters: { type: 'object', properties: { type: { type: 'string', enum: ['movie', 'series'] }, tmdbId: { type: 'integer' } }, required: ['type', 'tmdbId'] } } },
   { type: 'function', function: { name: 'free_full_videos', description: 'Newest full episodes or full movies uploaded by official channels on YouTube, playable free in NEXO.', parameters: { type: 'object', properties: { group: { type: 'string', enum: ['movies', 'series', 'dramas'] } }, required: ['group'] } } },
   { type: 'function', function: { name: 'save_memory', description: 'Remember a lasting fact about the viewer for future chats: favourite genres, languages, teams, actors, titles they loved or disliked, or anything they ask you to remember. One short fact per call, written in the third person (e.g. "Loves Korean romance dramas").', parameters: { type: 'object', properties: { fact: { type: 'string' } }, required: ['fact'] } } },
+  { type: 'function', function: { name: 'web_search', description: 'Search the web for current facts NEXO tools do not cover: entertainment and sports news, release dates, box office, awards, cast announcements, match results, standings, schedules. Returns a short answer and sources with snippets.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'A focused search query, including the year when it matters.' }, news: { type: 'boolean', description: 'true for recent news and results from the last two weeks.' } }, required: ['query'] } } },
   { type: 'function', function: { name: 'sports_now', description: 'Sports broadcasts live right now on official channels, plus the latest official sports videos and highlights.', parameters: { type: 'object', properties: {} } } },
 ];
+
+/** Web search uses Tavily: on when TAVILY_API_KEY is set, unless ASSISTANT_WEB_SEARCH=off. */
+const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
+const webSearchEnabled = () => Boolean(process.env.TAVILY_API_KEY?.trim()) && !['off', 'disabled', 'false', 'none'].includes((process.env.ASSISTANT_WEB_SEARCH ?? '').trim().toLowerCase());
+const toolsFor = () => (webSearchEnabled() ? TOOLS : TOOLS.filter((tool) => tool.function.name !== 'web_search'));
 
 const text = (value: unknown, max = 300) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
@@ -40,12 +46,11 @@ export function compactItem(item: Item) {
   };
 }
 
-/** The items whose titles the reply mentions, or the first results when it names none. Exported for tests. */
+/** The items whose titles the reply mentions; none when it names none, so unrelated results never show. Exported for tests. */
 export function pickCards(reply: string, items: Item[]): Item[] {
   const unique = [...new Map(items.map((item) => [String(item.id), item])).values()];
   const lower = reply.toLowerCase();
-  const named = unique.filter((item) => { const title = text(item.title ?? item.name, 160).toLowerCase(); return title.length >= 2 && lower.includes(title); });
-  return (named.length ? named : unique.slice(0, 4)).slice(0, MAX_CARDS);
+  return unique.filter((item) => { const title = text(item.title ?? item.name, 160).toLowerCase(); return title.length >= 2 && lower.includes(title); }).slice(0, MAX_CARDS);
 }
 
 @Injectable()
@@ -54,6 +59,8 @@ export class AssistantService {
   constructor(private readonly tmdb: TmdbService, private readonly sports: YouTubeFeedService, private readonly library: YouTubeLibraryService) {}
 
   get configured() { return Boolean(process.env.OPENROUTER_API_KEY?.trim()); }
+  /** What is switched on, without any secrets; for checking a deployment. */
+  status() { return { configured: this.configured, model: this.model, webSearch: webSearchEnabled() }; }
   private get model() { return process.env.OPENROUTER_MODEL?.trim() || DEFAULT_MODEL; }
 
   private systemPrompt(region: string, memory: string[]) {
@@ -61,9 +68,10 @@ export class AssistantService {
     const remembered = memory.length ? ['What you remember about this viewer from earlier chats (use it to personalise; do not list it back unless asked):', ...memory.map((fact) => `- ${fact}`)] : [];
     return [
       `You are NEXO Assistant inside the NEXO streaming app. Today is ${today}. The viewer's country is ${region}.`,
-      'You help people find movies, TV series, web series, dramas and sports, and answer questions about them.',
-      'For anything current (what is trending, new, airing, live, or where to watch) call the tools first; never guess release dates, ratings, scores or schedules.',
-      'If the tools do not have the answer, say so plainly. Do not make up titles, scores or fixtures.',
+      'You help people find movies, TV series, web series, dramas and sports, and answer any question about them, like a knowledgeable film and sports expert.',
+      'Answer general questions (plots, cast, directors, history, trivia, comparisons, sports rules, players and teams, recommendations by taste) from your own knowledge.',
+      'For anything current or time sensitive (trending, new, airing, live, upcoming, release dates, box office, awards, news, match results, standings, schedules, where to watch) use the NEXO tools first; when they do not cover it, call web_search. Never guess dates, scores or schedules.',
+      'When you used web_search, cite the sources as Markdown links, e.g. [Variety](https://variety.com/...). If you still cannot find something, say so plainly; do not make up titles, scores or fixtures.',
       'Only point people to NEXO and to official or licensed services. Never suggest pirate sites, torrents, or unofficial streams, and refuse requests for them.',
       'When the viewer shares a lasting preference or asks you to remember something, call save_memory, then say briefly that you will remember it.',
       'Write in the language the viewer uses, formatted in Markdown like ChatGPT:',
@@ -83,7 +91,7 @@ export class AssistantService {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY?.trim()}`, 'Content-Type': 'application/json', 'X-Title': 'NEXO' },
-      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: TOOLS, tool_choice: 'auto' } : {}) }),
+      body: JSON.stringify({ model: this.model, messages, max_tokens: 1000, temperature: 0.4, ...(withTools ? { tools: toolsFor(), tool_choice: 'auto' } : {}) }),
       signal: AbortSignal.timeout(remaining),
     });
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
@@ -93,7 +101,27 @@ export class AssistantService {
     return message;
   }
 
-  private async runTool(name: string, rawArgs: string, region: string, remembered: string[]): Promise<Item[] | Item> {
+  /** Web results from Tavily: its short answer plus the top sources with snippets. */
+  private async webSearch(query: string, news: boolean, deadline: number): Promise<Item> {
+    const remaining = Math.min(deadline - Date.now() - 4_000, 10_000);
+    if (remaining < 2_000) return { error: 'No time left for a web search.' };
+    const response = await fetch(TAVILY_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.TAVILY_API_KEY?.trim()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, topic: news ? 'news' : 'general', ...(news ? { days: 14 } : {}), search_depth: 'basic', max_results: 5, include_answer: true }),
+      signal: AbortSignal.timeout(remaining),
+    });
+    if (!response.ok) return { error: `Web search failed (${response.status}).` };
+    const body = (await response.json()) as { answer?: string; results?: { title?: string; url?: string; content?: string; published_date?: string }[] };
+    const sources = (body.results ?? []).flatMap((result) => {
+      const url = result.url ?? '';
+      if (!/^https:\/\//.test(url)) return [];
+      return [{ title: text(result.title, 120) || new URL(url).hostname, url, snippet: text(result.content, 400), published: text(result.published_date, 40) || undefined }];
+    });
+    return { answer: text(body.answer, 1200) || undefined, sources: [...new Map(sources.map((source) => [source.url, source])).values()].slice(0, 5) };
+  }
+
+  private async runTool(name: string, rawArgs: string, region: string, remembered: string[], deadline: number): Promise<Item[] | Item> {
     let args: Record<string, unknown> = {};
     try { args = JSON.parse(rawArgs || '{}') as Record<string, unknown>; } catch { return { error: 'Arguments were not valid JSON.' }; }
     const kindOf = (value: unknown, allowed: string[], fallback: string) => (typeof value === 'string' && allowed.includes(value) ? value : fallback);
@@ -122,6 +150,12 @@ export class AssistantService {
       }
       case 'free_full_videos':
         return (await this.library.latest(kindOf(args.group, ['movies', 'series', 'dramas'], 'dramas') as LibraryGroup, 10)) as unknown as Item[];
+      case 'web_search': {
+        const query = text(args.query, 200);
+        if (!query) return { error: 'query is required' };
+        if (!webSearchEnabled()) return { error: 'Web search is turned off.' };
+        return this.webSearch(query, args.news === true, deadline);
+      }
       case 'save_memory': {
         const fact = text(args.fact, 200).replace(/\s+/g, ' ');
         if (fact.length < 3) return { error: 'fact is required' };
@@ -155,7 +189,7 @@ export class AssistantService {
           return { reply, items: pickCards(reply, found), remembered };
         }
         messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: calls });
-        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
+        const results = await Promise.all(calls.map((call) => this.runTool(call.function.name, call.function.arguments, region, remembered, deadline).catch((error) => ({ error: error instanceof Error ? error.message : 'Tool failed' }))));
         calls.forEach((call, index) => {
           const result = results[index];
           if (Array.isArray(result)) found.push(...result.filter((item) => item.id));

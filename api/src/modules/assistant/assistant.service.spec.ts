@@ -19,8 +19,8 @@ describe('pickCards', () => {
   it('returns the titles the reply names, without duplicates', () => {
     expect(pickCards('Try Crash Landing on You tonight.', [movie, series, series]).map((item) => item.id)).toEqual(['tmdb-tv-1']);
   });
-  it('falls back to the first results when no title is named', () => {
-    expect(pickCards('Here is what is trending.', [movie, series])).toHaveLength(2);
+  it('shows no cards when the reply names no title', () => {
+    expect(pickCards("I couldn't find anything for SAFF Games 2026.", [movie, series])).toEqual([]);
   });
 });
 
@@ -35,8 +35,8 @@ describe('AssistantService.chat', () => {
   const tmdb = { searchMovies: jest.fn(async () => [movie]), searchSeries: jest.fn(async () => []) } as unknown as TmdbService;
   const service = new AssistantService(tmdb, {} as YouTubeFeedService, {} as YouTubeLibraryService);
   const reply = (message: object) => new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
-  beforeEach(() => { process.env.OPENROUTER_API_KEY = 'test-key'; });
-  afterEach(() => { delete process.env.OPENROUTER_API_KEY; jest.restoreAllMocks(); });
+  beforeEach(() => { process.env.OPENROUTER_API_KEY = 'test-key'; process.env.TAVILY_API_KEY = 'tvly-test'; });
+  afterEach(() => { delete process.env.OPENROUTER_API_KEY; delete process.env.TAVILY_API_KEY; jest.restoreAllMocks(); });
 
   it('runs the tool the model asks for and returns the reply with cards', async () => {
     const fetchMock = jest.spyOn(global, 'fetch')
@@ -63,9 +63,38 @@ describe('AssistantService.chat', () => {
     expect(first.messages[0].content).toContain('- Supports Barcelona');
   });
 
+  it('answers current questions through web search with sources', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: null, tool_calls: [{ id: 'w1', type: 'function', function: { name: 'web_search', arguments: '{"query":"Ballon d\'Or 2026 winner"}' } }] }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ answer: 'X won.', results: [{ title: 'Example News', url: 'https://example.com/news', content: 'X won the award.', published_date: '2026-10-28' }, { title: 'Bad', url: 'javascript:alert(1)', content: '' }] }), { status: 200 }))
+      .mockResolvedValueOnce(reply({ role: 'assistant', content: 'X won the 2026 Ballon d\'Or, per [Example News](https://example.com/news).' }));
+    const result = await service.chat([{ role: 'user', content: "Who won the Ballon d'Or?" }]);
+    expect(result.reply).toContain('[Example News]');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.tavily.com/search');
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer tvly-test' });
+    const search = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body)) as { query: string; include_answer: boolean };
+    expect(search).toMatchObject({ query: "Ballon d'Or 2026 winner", include_answer: true });
+    const final = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body)) as { messages: { role: string; content: string }[] };
+    const tool = JSON.parse(final.messages.find((message) => message.role === 'tool')!.content) as { sources: { url: string }[] };
+    expect(tool.sources).toEqual([{ title: 'Example News', url: 'https://example.com/news', snippet: 'X won the award.', published: '2026-10-28' }]);
+  });
+
+  it('leaves web search out without a Tavily key', async () => {
+    delete process.env.TAVILY_API_KEY;
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValueOnce(reply({ role: 'assistant', content: 'Hello!' }));
+    await service.chat([{ role: 'user', content: 'hi' }]);
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { tools: { function: { name: string } }[] };
+    expect(body.tools.map((tool) => tool.function.name)).not.toContain('web_search');
+  });
+
   it('reports a clear error when OpenRouter fails', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 502 }));
     await expect(service.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow('busy');
+  });
+
+  it('reports what is switched on without secrets', () => {
+    expect(service.status()).toEqual({ configured: true, model: 'deepseek/deepseek-v4-flash', webSearch: true });
+    expect(JSON.stringify(service.status())).not.toContain('tvly-test');
   });
 
   it('is unavailable without a key', async () => {

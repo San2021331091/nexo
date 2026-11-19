@@ -68,7 +68,18 @@ export class ChannelRepository {
     const ytCol = choose(shape.columns, ['youtubeurl', 'youtube_url']);
     const where: string[] = [];
     const params: unknown[] = [];
-    if (nameCol && search.trim()) { params.push(`%${search.trim()}%`); where.push(`${quote(nameCol)} ILIKE $${params.length}`); }
+    if (nameCol && search.trim()) {
+      const term = search.trim();
+      params.push(`%${term}%`);
+      const any = [`${quote(nameCol)} ILIKE $${params.length}`];
+      if (descriptionCol) any.push(`COALESCE(${quote(descriptionCol)}::text, '') ILIKE $${params.length}`);
+      // "sports", "news", "bangladesh": channels whose category name contains the term.
+      if (catCol) {
+        const categories = (await this.categories()).filter((item) => item.name.toLowerCase().includes(term.toLowerCase()));
+        if (categories.length) { params.push(categories.flatMap((item) => [item.id, item.name])); any.push(`${quote(catCol)}::text = ANY($${params.length})`); }
+      }
+      where.push(`(${any.join(' OR ')})`);
+    }
     if (catCol && category.trim()) { const match = (await this.categories()).find((item) => item.name.toLowerCase() === category.trim().toLowerCase()); params.push(match?.name ?? category.trim()); where.push(`${quote(catCol)}::text ILIKE $${params.length}`); }
     if (activeCol) where.push(`COALESCE(${quote(activeCol)}::text, 'true') NOT IN ('false', '0', 'inactive', 'disabled')`);
     const safeLimit = Math.min(Math.max(limit, 1), MAX_CHANNELS);
