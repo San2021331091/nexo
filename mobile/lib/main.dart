@@ -15,6 +15,7 @@ import 'features/catalog/content_details_page.dart';
 import 'features/player/player_page.dart';
 import 'features/search/section_search_page.dart';
 import 'features/shell/app_shell.dart';
+import 'features/splash/splash_page.dart';
 import 'features/shorts/shorts_page.dart';
 
 Future<void> main() async {
@@ -25,6 +26,7 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env', isOptional: true);
   final repository = CatalogRepository();
   runApp(BlocProvider(
+      lazy: false,
       create: (_) => CatalogCubit(repository)..load(), child: const NexoApp()));
 }
 
@@ -36,7 +38,10 @@ class NexoApp extends StatefulWidget {
 
 class _NexoAppState extends State<NexoApp> {
   // Built once so navigation state survives rebuilds and hot reload.
-  final _router = GoRouter(initialLocation: '/', routes: [
+  final _router = GoRouter(initialLocation: '/splash', routes: [
+    GoRoute(
+        path: '/splash',
+        builder: (context, state) => const SplashPage()),
     GoRoute(path: '/', builder: (context, state) => const AppShell()),
     GoRoute(
         path: '/browse',
