@@ -14,20 +14,19 @@ describe('checkPrompt', () => {
 });
 
 describe('parseVideoJob', () => {
-  it('maps queued, running, done and failed states', () => {
+  it('maps Magic Hour project states and signed download URLs', () => {
     expect(parseVideoJob('v', { status: 'queued', progress: 0 })).toMatchObject({ status: 'queued' });
-    expect(parseVideoJob('v', { status: 'in_progress', progress: 40 })).toMatchObject({ status: 'running', progress: 40 });
-    expect(parseVideoJob('v', { status: 'completed', video_url: 'https://cdn.example/v.mp4' })).toEqual({ id: 'v', status: 'done', progress: 100, url: 'https://cdn.example/v.mp4' });
-    expect(parseVideoJob('v', { status: 'completed', remixed_from_video_id: 'https://cdn.example/r.mp4' })).toMatchObject({ status: 'done', url: 'https://cdn.example/r.mp4' });
-    expect(parseVideoJob('v', { status: 'failed', error: { message: 'division by zero' } })).toMatchObject({ status: 'failed', error: 'division by zero' });
+    expect(parseVideoJob('v', { status: 'rendering', progress: 40 })).toMatchObject({ status: 'running', progress: 40 });
+    expect(parseVideoJob('v', { status: 'complete', downloads: [{ url: 'https://videos.magichour.ai/v.mp4' }] })).toEqual({ id: 'v', status: 'done', progress: 100, url: 'https://videos.magichour.ai/v.mp4' });
+    expect(parseVideoJob('v', { status: 'error', error: { message: 'render failed' } })).toMatchObject({ status: 'failed', error: 'render failed' });
   });
   it('treats a finished job without an HTTPS file as failed', () => {
-    expect(parseVideoJob('v', { status: 'completed', url: 'http://insecure.example/v.mp4' })).toMatchObject({ status: 'failed' });
+    expect(parseVideoJob('v', { status: 'complete', downloads: [{ url: 'http://insecure.example/v.mp4' }] })).toMatchObject({ status: 'failed' });
   });
 });
 
 describe('MediaService', () => {
-  const env = ['AGNES_API_KEY', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'];
+  const env = ['AGNES_API_KEY', 'MAGIC_HOUR_KEY', 'MAGIC_HOUR_VIDEO_MODEL', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'];
   afterEach(() => { for (const name of env) delete process.env[name]; jest.restoreAllMocks(); });
 
   it('makes a poster with Agnes at a 2:3 size', async () => {
@@ -57,26 +56,34 @@ describe('MediaService', () => {
   });
 
   it('starts a text-to-video job and reports a busy queue clearly', async () => {
-    process.env.AGNES_API_KEY = 'sk-test';
+    process.env.MAGIC_HOUR_KEY = 'mh-test';
     const fetchMock = jest.spyOn(global, 'fetch')
-      .mockResolvedValueOnce(json({ video_id: 'video_abc123', status: 'queued', progress: 0 }))
-      .mockResolvedValueOnce(json({ code: 'video_queue_full', message: 'video queue is full' }, 400));
+      .mockResolvedValueOnce(json({ id: 'cuid_abc123', credits_charged: 450 }))
+      .mockResolvedValueOnce(json({ message: 'busy' }, 429));
     const service = new MediaService();
-    await expect(service.startVideo('Rain over a neon city')).resolves.toMatchObject({ id: 'video_abc123', status: 'queued' });
-    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({ model: 'agnes-video-2.5-flash', mode: 'text', prompt: 'Rain over a neon city' });
+    await expect(service.startVideo('Rain over a neon city')).resolves.toMatchObject({ id: 'cuid_abc123', status: 'queued' });
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.magichour.ai/v1/text-to-video');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer mh-test' });
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toEqual({
+      end_seconds: 5,
+      style: { prompt: 'Rain over a neon city' },
+      aspect_ratio: '16:9',
+      model: 'ltx-2.5',
+      resolution: '480p',
+    });
     await expect(service.startVideo('Rain over a neon city')).rejects.toThrow('busy');
   });
 
-  it('polls new and old style video ids at the right endpoint', async () => {
-    process.env.AGNES_API_KEY = 'sk-test';
+  it('polls Magic Hour projects and parses their downloads', async () => {
+    process.env.MAGIC_HOUR_KEY = 'mh-test';
     const fetchMock = jest.spyOn(global, 'fetch')
-      .mockResolvedValueOnce(json({ status: 'completed', video_url: 'https://cdn.example/v.mp4' }))
-      .mockResolvedValueOnce(json({ status: 'in_progress', progress: 50 }));
+      .mockResolvedValueOnce(json({ id: 'cuid_abc123', status: 'complete', downloads: [{ url: 'https://videos.magichour.ai/v.mp4' }] }))
+      .mockResolvedValueOnce(json({ id: 'cuid_def456', status: 'rendering' }));
     const service = new MediaService();
-    await expect(service.video('video_abc123')).resolves.toMatchObject({ status: 'done', url: 'https://cdn.example/v.mp4' });
-    await expect(service.video('task_xyz789')).resolves.toMatchObject({ status: 'running', progress: 50 });
-    expect(String(fetchMock.mock.calls[0][0])).toBe('https://apihub.agnes-ai.com/agnesapi?video_id=video_abc123');
-    expect(String(fetchMock.mock.calls[1][0])).toBe('https://apihub.agnes-ai.com/v1/videos/task_xyz789');
+    await expect(service.video('cuid_abc123')).resolves.toMatchObject({ status: 'done', url: 'https://videos.magichour.ai/v.mp4' });
+    await expect(service.video('cuid_def456')).resolves.toMatchObject({ status: 'running', progress: 0 });
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.magichour.ai/v1/video-projects/cuid_abc123');
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://api.magichour.ai/v1/video-projects/cuid_def456');
     await expect(service.video('../etc')).rejects.toThrow('Unknown video');
   });
 });
