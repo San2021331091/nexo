@@ -134,6 +134,7 @@ export class MediaService {
           end_seconds: 5,
           style: { prompt },
           aspect_ratio: '16:9',
+          audio: true,
           model: process.env.MAGIC_HOUR_VIDEO_MODEL?.trim() || DEFAULT_VIDEO_MODEL,
           resolution: '480p',
         }),
